@@ -92,19 +92,20 @@ namespace inst::ui {
             return;
 
         if (force || regainedFocus || !padIsConnected(&this->input_pad)) {
-            padConfigureInput(1, HidNpadStyleSet_NpadStandard);
-            padInitializeDefault(&this->input_pad);
+            padConfigureInput(8, HidNpadStyleSet_NpadStandard);
+            padInitializeAny(&this->input_pad);
         }
     }
 
     void MainApplication::OnLoad() {
         mainApp = this;
+        this->RefreshInputDevice(true);
 
         Language::Load();
 
         this->mainPage = MainPage::New();
         this->netinstPage = netInstPage::New();
-        this->shopinstPage = shopInstPage::New();
+        this->remoteinstPage = remoteInstPage::New();
         this->sdinstPage = sdInstPage::New();
         this->usbinstPage = usbInstPage::New();
         this->hddinstPage = hddInstPage::New();
@@ -112,7 +113,7 @@ namespace inst::ui {
         this->optionspage = optionsPage::New();
         this->mainPage->SetOnInput(std::bind(&MainPage::onInput, this->mainPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
         this->netinstPage->SetOnInput(std::bind(&netInstPage::onInput, this->netinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-        this->shopinstPage->SetOnInput(std::bind(&shopInstPage::onInput, this->shopinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+        this->remoteinstPage->SetOnInput(std::bind(&remoteInstPage::onInput, this->remoteinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
         this->sdinstPage->SetOnInput(std::bind(&sdInstPage::onInput, this->sdinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
         this->usbinstPage->SetOnInput(std::bind(&usbInstPage::onInput, this->usbinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
         this->hddinstPage->SetOnInput(std::bind(&hddInstPage::onInput, this->hddinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
@@ -280,7 +281,7 @@ namespace inst::ui {
                                 this->instpage->installIconImage->SetHeight(kRightIconSize);
                                 this->instpage->installIconImage->SetVisible(true);
                                 this->instpage->awooImage->SetVisible(false);
-                                const std::string msg = last_name + "inst.info_page.desc1"_lang + "\n\n" + Language::GetRandomMsg();
+                                const std::string msg = last_name + "inst.info_page.desc1"_lang + "\n\n" + "inst.info_page.complete"_lang;
                                 this->instpage->installInfoText->SetText(WrapForTextBlock(this->instpage->installInfoText, msg, 900));
                                 this->instpage->installInfoText->SetX(40);
                                 this->instpage->installInfoText->SetY(240);
@@ -294,7 +295,7 @@ namespace inst::ui {
             if (inst::mtp::ConsumeStreamInstallComplete()) {
                 this->instpage->installBar->SetVisible(true);
                 this->instpage->installBar->SetProgress(100);
-                const std::string done_msg = last_name + "inst.info_page.desc1"_lang + "\n\n" + Language::GetRandomMsg() + "\n\n" + "inst.mtp.waiting.hint"_lang;
+                const std::string done_msg = last_name + "inst.info_page.desc1"_lang + "\n\n" + "inst.info_page.complete"_lang + "\n\n" + "inst.mtp.waiting.hint"_lang;
                 this->instpage->installInfoText->SetText(WrapForTextBlock(this->instpage->installInfoText, done_msg, 900));
                 this->instpage->installInfoText->SetX(40);
                 this->instpage->installInfoText->SetY(240);
@@ -610,7 +611,7 @@ namespace inst::ui {
 
             applyAll(this->mainPage);
             applyAll(this->netinstPage);
-            applyAll(this->shopinstPage);
+            applyAll(this->remoteinstPage);
             applyAll(this->sdinstPage);
             applyAll(this->usbinstPage);
             applyAll(this->hddinstPage);

@@ -6,7 +6,7 @@ namespace Language {
     void Load();
     std::string LanguageEntry(std::string key);
     std::string GetRandomMsg();
-    std::string GetShopHeaderLanguage();
+    std::string GetRemoteHeaderLanguage();
 }
 
 inline std::string operator ""_lang (const char* key, size_t size) {

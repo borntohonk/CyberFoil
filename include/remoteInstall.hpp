@@ -1,0 +1,43 @@
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <vector>
+
+namespace remoteInstStuff {
+    using RemoteFetchProgressCallback = std::function<void(std::uint64_t downloaded, std::uint64_t total)>;
+
+    struct RemoteItem {
+        std::string name;
+        std::string url;
+        std::string iconUrl;
+        std::string appId;
+        std::string saveId;
+        std::string saveNote;
+        std::string saveCreatedAt;
+        std::uint64_t saveCreatedTs = 0;
+        std::uint64_t size;
+        std::uint64_t titleId = 0;
+        std::uint32_t appVersion = 0;
+        std::uint32_t releaseDate = 0;
+        std::int32_t appType = -1;
+        bool hasTitleId = false;
+        bool hasAppVersion = false;
+        bool hasReleaseDate = false;
+        bool hasIconUrl = false;
+        bool hasAppId = false;
+    };
+
+    struct RemoteSection {
+        std::string id;
+        std::string title;
+        std::vector<RemoteItem> items;
+    };
+
+    std::vector<RemoteItem> FetchRemote(const std::string& remoteUrl, const std::string& user, const std::string& pass, std::string& error, const RemoteFetchProgressCallback& progressCb = RemoteFetchProgressCallback());
+    std::vector<RemoteSection> FetchRemoteSections(const std::string& remoteUrl, const std::string& user, const std::string& pass, std::string& error, bool* outUsedLegacyFallback = nullptr, const RemoteFetchProgressCallback& progressCb = RemoteFetchProgressCallback());
+    std::string FetchRemoteMotd(const std::string& remoteUrl, const std::string& user, const std::string& pass);
+    std::string GetRemoteApiPrefix();
+    void installTitleRemote(const std::vector<RemoteItem>& items, int storage, const std::string& sourceLabel);
+}

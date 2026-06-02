@@ -3,7 +3,7 @@
 #include <switch.h>
 #include "ui/mainPage.hpp"
 #include "ui/netInstPage.hpp"
-#include "ui/shopInstPage.hpp"
+#include "ui/remoteInstPage.hpp"
 #include "ui/sdInstPage.hpp"
 #include "ui/usbInstPage.hpp"
 #include "ui/hddInstPage.hpp"
@@ -23,7 +23,7 @@ namespace inst::ui {
             pu::ui::Layout::Ref GetCurrentLayout() const { return this->lyt; }
             MainPage::Ref mainPage;
             netInstPage::Ref netinstPage;
-            shopInstPage::Ref shopinstPage;
+            remoteInstPage::Ref remoteinstPage;
             sdInstPage::Ref sdinstPage;
             usbInstPage::Ref usbinstPage;
             hddInstPage::Ref hddinstPage;

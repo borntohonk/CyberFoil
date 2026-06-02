@@ -325,6 +325,35 @@ namespace inst::offline
             return !(out.name.empty() && out.publisher.empty() && !out.hasSize && !out.hasVersion && !out.hasReleaseDate && !out.hasIsDemo);
         }
 
+        bool ParseMetadataEntryMap(const nlohmann::json& entries, std::unordered_map<std::uint64_t, TitleMetadata>& parsed)
+        {
+            if (!entries.is_object())
+                return false;
+
+            bool parsedAny = false;
+            for (const auto& it : entries.items()) {
+                const nlohmann::json& value = it.value();
+                if (!value.is_object())
+                    continue;
+
+                std::uint64_t titleId = 0;
+                if (!TryParseHexU64(it.key(), titleId)) {
+                    if (!value.contains("id") || !value["id"].is_string())
+                        continue;
+                    if (!TryParseHexU64(value["id"].get<std::string>(), titleId))
+                        continue;
+                }
+
+                TitleMetadata meta;
+                if (ParseMetadataFromObject(value, meta)) {
+                    parsed[titleId] = std::move(meta);
+                    parsedAny = true;
+                }
+            }
+
+            return parsedAny;
+        }
+
         std::string ReadPackedString(const std::vector<char>& blob, std::uint32_t offset)
         {
             if (offset == 0)
@@ -451,6 +480,15 @@ namespace inst::offline
 
             std::unordered_map<std::uint64_t, TitleMetadata> parsed;
 
+            if (root.is_object() && root.contains("titledb") && root["titledb"].is_object()) {
+                if (ParseMetadataEntryMap(root["titledb"], parsed)) {
+                    g_metadataById = std::move(parsed);
+                    LOG_DEBUG("Offline DB: loaded %llu metadata entries from titledb wrapper %s\n",
+                        static_cast<unsigned long long>(g_metadataById.size()), path.c_str());
+                    return true;
+                }
+            }
+
             auto pushDenseRows = [&](const nlohmann::json& rows) {
                 if (!rows.is_array())
                     return;
@@ -469,22 +507,7 @@ namespace inst::offline
                 pushDenseRows(root);
             } else if (root.is_object()) {
                 parsed.reserve(root.size());
-                for (const auto& it : root.items()) {
-                    std::uint64_t titleId = 0;
-                    std::string titleKey = it.key();
-                    if (!TryParseHexU64(titleKey, titleId)) {
-                        if (it.value().contains("id") && it.value()["id"].is_string()) {
-                            titleKey = it.value()["id"].get<std::string>();
-                            if (!TryParseHexU64(titleKey, titleId))
-                                continue;
-                        } else {
-                            continue;
-                        }
-                    }
-                    TitleMetadata meta;
-                    if (ParseMetadataFromObject(it.value(), meta))
-                        parsed[titleId] = std::move(meta);
-                }
+                ParseMetadataEntryMap(root, parsed);
             }
 
             if (parsed.empty())

@@ -328,9 +328,9 @@ namespace inst::ui {
         this->netInstallMenuItem = pu::ui::elm::MenuItem::New("main.menu.net"_lang);
         this->netInstallMenuItem->SetColor(COLOR("#FFFFFFFF"));
         this->netInstallMenuItem->SetIcon("romfs:/images/icons/cloud-download.png");
-        this->shopInstallMenuItem = pu::ui::elm::MenuItem::New("main.menu.shop"_lang);
-        this->shopInstallMenuItem->SetColor(COLOR("#FFFFFFFF"));
-        this->shopInstallMenuItem->SetIcon("romfs:/images/icons/eshop.png");
+        this->remoteInstallMenuItem = pu::ui::elm::MenuItem::New("main.menu.remote"_lang);
+        this->remoteInstallMenuItem->SetColor(COLOR("#FFFFFFFF"));
+        this->remoteInstallMenuItem->SetIcon("romfs:/images/icons/remote.png");
         this->usbInstallMenuItem = pu::ui::elm::MenuItem::New("main.menu.usb"_lang);
         this->usbInstallMenuItem->SetColor(COLOR("#FFFFFFFF"));
         this->usbInstallMenuItem->SetIcon("romfs:/images/icons/usb-port.png");
@@ -352,7 +352,7 @@ namespace inst::ui {
         const auto tileColor = inst::config::oledMode ? COLOR("#1A1A1ACC") : COLOR("#170909CC");
         const auto highlightColor = inst::config::oledMode ? COLOR("#FF4D4D66") : COLOR("#FF4D4D88");
         const std::vector<std::string> gridLabels = {
-            "main.menu.shop"_lang,
+            "main.menu.remote"_lang,
             "main.menu.sd"_lang,
             "main.menu.hdd"_lang,
             "main.menu.mtp"_lang,
@@ -363,7 +363,7 @@ namespace inst::ui {
             "main.menu.exit"_lang
         };
         const std::vector<std::string> gridIcons = {
-            "romfs:/images/icons/eshop.png",
+            "romfs:/images/icons/remote.png",
             "romfs:/images/icons/micro-sd.png",
             "romfs:/images/icons/usb-install.png",
             "romfs:/images/icons/usb-port.png",
@@ -453,12 +453,12 @@ namespace inst::ui {
         mainApp->netinstPage->startNetwork();
     }
 
-    void MainPage::shopInstallMenuItem_Click() {
+    void MainPage::remoteInstallMenuItem_Click() {
         if (inst::util::getIPAddress() == "1.0.0.127") {
             inst::ui::mainApp->CreateShowDialog("main.net.title"_lang, "main.net.desc"_lang, {"common.ok"_lang}, true);
             return;
         }
-        mainApp->shopinstPage->startShop();
+        mainApp->remoteinstPage->startRemote();
     }
 
     void MainPage::usbInstallMenuItem_Click() {
@@ -497,7 +497,7 @@ namespace inst::ui {
     }
 
     void MainPage::backupSaveDataMenuItem_Click() {
-        if (inst::config::shopLegacyMode) {
+        if (inst::config::remoteLegacyMode) {
             mainApp->CreateShowDialog(
                 "main.menu.backup"_lang,
                 "Save data backups are disabled while Tinfoil Mode is enabled.",
@@ -533,17 +533,17 @@ namespace inst::ui {
             return;
         const AccountUid selectedUid = users[static_cast<std::size_t>(selectedUserIndex)].uid;
 
-        std::string shopUrl = inst::config::shopUrl;
-        if (shopUrl.empty()) {
-            std::vector<inst::config::ShopProfile> shops = inst::config::LoadShops();
-            if (!shops.empty() && inst::config::SetActiveShop(shops.front(), true))
-                shopUrl = inst::config::shopUrl;
+        std::string remoteUrl = inst::config::remoteUrl;
+        if (remoteUrl.empty()) {
+            std::vector<inst::config::RemoteProfile> remotes = inst::config::LoadRemotes();
+            if (!remotes.empty() && inst::config::SetActiveRemote(remotes.front(), true))
+                remoteUrl = inst::config::remoteUrl;
         }
-        if (shopUrl.empty()) {
-            shopUrl = inst::util::softwareKeyboard("options.shop.url_hint"_lang, "http://", 200);
-            if (shopUrl.empty())
+        if (remoteUrl.empty()) {
+            remoteUrl = inst::util::softwareKeyboard("options.remote.url_hint"_lang, "http://", 200);
+            if (remoteUrl.empty())
                 return;
-            inst::config::shopUrl = shopUrl;
+            inst::config::remoteUrl = remoteUrl;
             inst::config::setConfig();
         }
 
@@ -567,9 +567,9 @@ namespace inst::ui {
         inst::ui::instPage::setProgressDetailText("Fetching server save metadata...");
         inst::ui::instPage::setInstBarPerc(10);
 
-        std::vector<shopInstStuff::ShopItem> remoteSaveItems;
+        std::vector<remoteInstStuff::RemoteItem> remoteSaveItems;
         std::string remoteFetchWarning;
-        inst::save_sync::FetchRemoteSaveItems(shopUrl, inst::config::shopUser, inst::config::shopPass, remoteSaveItems, remoteFetchWarning);
+        inst::save_sync::FetchRemoteSaveItems(remoteUrl, inst::config::remoteUser, inst::config::remotePass, remoteSaveItems, remoteFetchWarning);
 
         inst::ui::instPage::setInstInfoText("Scanning local saves...");
         inst::ui::instPage::setProgressDetailText("Reading saves for selected user...");
@@ -603,25 +603,25 @@ namespace inst::ui {
             return;
         }
 
-        std::string shopDisplayName;
-        std::vector<inst::config::ShopProfile> shops = inst::config::LoadShops();
-        for (const auto& shop : shops) {
-            if (inst::config::BuildShopUrl(shop) == shopUrl &&
-                shop.username == inst::config::shopUser &&
-                shop.password == inst::config::shopPass) {
-                shopDisplayName = shop.title;
+        std::string remoteDisplayName;
+        std::vector<inst::config::RemoteProfile> remotes = inst::config::LoadRemotes();
+        for (const auto& remote : remotes) {
+            if (inst::config::BuildRemoteUrl(remote) == remoteUrl &&
+                remote.username == inst::config::remoteUser &&
+                remote.password == inst::config::remotePass) {
+                remoteDisplayName = remote.title;
                 break;
             }
         }
-        if (shopDisplayName.empty())
-            shopDisplayName = shopUrl;
+        if (remoteDisplayName.empty())
+            remoteDisplayName = remoteUrl;
 
         inst::ui::instPage::clearProgressDetailText();
         mainApp->LoadLayout(mainApp->mainPage);
         const int confirm = mainApp->CreateShowDialog(
             "main.menu.backup"_lang,
             "Upload all local saves to the server now?\n"
-            "Shop: " + inst::util::shortenString(shopDisplayName, 86, false) + "\n"
+            "Remote: " + inst::util::shortenString(remoteDisplayName, 86, false) + "\n"
             "Saves to upload: " + std::to_string(localEntries.size()),
             {"Upload All", "common.cancel"_lang},
             false);
@@ -648,7 +648,7 @@ namespace inst::ui {
             inst::ui::instPage::setInstBarPerc(progress);
 
             std::string error;
-            if (inst::save_sync::UploadSaveToServerForUser(shopUrl, inst::config::shopUser, inst::config::shopPass, &selectedUid, *entry, backupNote, error)) {
+            if (inst::save_sync::UploadSaveToServerForUser(remoteUrl, inst::config::remoteUser, inst::config::remotePass, &selectedUid, *entry, backupNote, error)) {
                 uploadedCount++;
                 continue;
             }
@@ -784,7 +784,7 @@ namespace inst::ui {
     void MainPage::activateSelectedMainItem() {
         switch (this->selectedMainIndex) {
             case 0:
-                this->shopInstallMenuItem_Click();
+                this->remoteInstallMenuItem_Click();
                 break;
             case 1:
                 this->installMenuItem_Click();
@@ -820,8 +820,8 @@ namespace inst::ui {
         std::string desc;
         switch (this->selectedMainIndex) {
             case 0:
-                title = "main.menu.shop"_lang;
-                desc = "main.info.shop"_lang;
+                title = "main.menu.remote"_lang;
+                desc = "main.info.remote"_lang;
                 break;
             case 1:
                 title = "main.menu.sd"_lang;

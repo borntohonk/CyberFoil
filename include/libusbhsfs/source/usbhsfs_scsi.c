@@ -784,7 +784,13 @@ static bool usbHsFsScsiSendWrite10Command(UsbHsFsDriveContext *drive_ctx, u8 lun
 }
 
 /* Reference: https://www.seagate.com/files/staticfiles/support/docs/manual/Interface%20manuals/100293068j.pdf (page 227). */
-static bool usbHsFsScsiSendSynchronizeCache10Command(UsbHsFsDriveContext *drive_ctx, u8 lun, u32 block_addr, u16 block_count)
+#if defined(__GNUC__)
+#define USBHSFS_UNUSED __attribute__((unused))
+#else
+#define USBHSFS_UNUSED
+#endif
+
+static bool USBHSFS_UNUSED usbHsFsScsiSendSynchronizeCache10Command(UsbHsFsDriveContext *drive_ctx, u8 lun, u32 block_addr, u16 block_count)
 {
     /* Prepare CBW. */
     ScsiCommandBlockWrapper cbw = {0};
@@ -872,7 +878,7 @@ static bool usbHsFsScsiSendWrite16Command(UsbHsFsDriveContext *drive_ctx, u8 lun
 }
 
 /* Reference: https://www.seagate.com/files/staticfiles/support/docs/manual/Interface%20manuals/100293068j.pdf (page 229). */
-static bool usbHsFsScsiSendSynchronizeCache16Command(UsbHsFsDriveContext *drive_ctx, u8 lun, u64 block_addr, u32 block_count)
+static bool USBHSFS_UNUSED usbHsFsScsiSendSynchronizeCache16Command(UsbHsFsDriveContext *drive_ctx, u8 lun, u64 block_addr, u32 block_count)
 {
     /* Prepare CBW. */
     ScsiCommandBlockWrapper cbw = {0};
@@ -892,6 +898,7 @@ static bool usbHsFsScsiSendSynchronizeCache16Command(UsbHsFsDriveContext *drive_
     USBHSFS_LOG_MSG("Sending command (interface %d, LUN %u).", drive_ctx->usb_if_id, lun);
     return usbHsFsScsiTransferCommand(drive_ctx, &cbw, NULL);
 }
+#undef USBHSFS_UNUSED
 
 /* Reference: https://www.seagate.com/files/staticfiles/support/docs/manual/Interface%20manuals/100293068j.pdf (page 157). */
 static bool usbHsFsScsiSendReadCapacity16Command(UsbHsFsDriveContext *drive_ctx, u8 lun, ScsiReadCapacity16Data *read_capacity_16_data)

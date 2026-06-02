@@ -137,8 +137,8 @@ struct NczBlockHeader {
      {
           if (magic != NCZBLOCK_MAGIC)
           {
-               const auto mbad = reinterpret_cast<const u8*>(&magic);
-               const auto mgood = reinterpret_cast<const u8*>(&NCZBLOCK_MAGIC);
+               [[maybe_unused]] const auto mbad = reinterpret_cast<const u8*>(&magic);
+               [[maybe_unused]] const auto mgood = reinterpret_cast<const u8*>(&NCZBLOCK_MAGIC);
                LOG_DEBUG("[NczBlockHeader] ERROR: Invalid magic: %02X %02X %02X %02X %02X %02X %02X %02X (must be %02X %02X %02X %02X %02X %02X %02X %02X)",
                              mbad[0], mbad[1], mbad[2], mbad[3], mbad[4], mbad[5], mbad[6], mbad[7],
                              mgood[0], mgood[1], mgood[2], mgood[3], mgood[4], mgood[5], mgood[6], mgood[7]);
@@ -630,11 +630,11 @@ private:
      // Returns -1 if none found
      int getSectionIndexForOffset(u64 offset)
      {
-          for (int i = 0; i < sections.size(); i++)
+          for (size_t i = 0; i < sections.size(); i++)
           {
                if (offset >= sections[i].offset && offset < sections[i].offset + sections[i].size)
                {
-                    return i;
+                    return static_cast<int>(i);
                }
           }
           return -1;
@@ -646,11 +646,11 @@ private:
      {
           int nextSectionIdx = -1;
           u64 nextSectionOffset = std::numeric_limits<u64>::max();
-          for (int i = 0; i < sections.size(); i++)
+          for (size_t i = 0; i < sections.size(); i++)
           {
                if (sections[i].offset > offset && sections[i].offset < nextSectionOffset)
                {
-                    nextSectionIdx = i;
+                    nextSectionIdx = static_cast<int>(i);
                     nextSectionOffset = sections[i].offset;
                }
           }
@@ -876,7 +876,7 @@ private:
 
      std::vector<NczSectionHeader> sections;
      std::unique_ptr<Aes128CtrCipher> currentSectionCipher; // Crypto cipher for current section
-     u64 currentSectionIdx = (u64)-1; // Track which section the cipher is for
+     int currentSectionIdx = -1; // Track which section the cipher is for
 };
 
 // region NcaWriter Methods

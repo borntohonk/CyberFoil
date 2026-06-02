@@ -7,7 +7,10 @@
 namespace inst::config {
     static const std::string appDir = "sdmc:/switch/CyberFoil";
     static const std::string configPath = appDir + "/config.json";
-    static const std::string shopsDir = appDir + "/shops";
+    static const std::string remotesDir = appDir + "/remotes";
+    static const std::string legacyShopsDir = appDir + "/shops";
+    static const std::string remoteIconsDir = appDir + "/remote_icons";
+    static const std::string legacyShopIconsDir = appDir + "/shop_icons";
     static const std::string appVersion = std::string(APP_VERSION);
 #ifdef APP_GIT_META
     static const std::string appGitMeta = std::string(APP_GIT_META);
@@ -23,9 +26,9 @@ namespace inst::config {
     extern std::string gAuthKey;
     extern std::string lastNetUrl;
     extern std::string offlineDbManifestUrl;
-    extern std::string shopUrl;
-    extern std::string shopUser;
-    extern std::string shopPass;
+    extern std::string remoteUrl;
+    extern std::string remoteUser;
+    extern std::string remotePass;
     extern std::string httpUserAgentMode;
     extern std::string httpUserAgent;
     extern std::vector<std::string> updateInfo;
@@ -40,15 +43,15 @@ namespace inst::config {
     extern bool oledMode;
     extern bool mtpExposeAlbum;
     extern bool usbAck;
-    extern bool shopHideInstalled;
-    extern bool shopHideInstalledSection;
-    extern bool shopAllBaseOnly;
-    extern bool shopLegacyMode;
-    extern bool shopStartGridMode;
+    extern bool remoteHideInstalled;
+    extern bool remoteHideInstalledSection;
+    extern bool remoteAllBaseOnly;
+    extern bool remoteLegacyMode;
+    extern bool remoteStartGridMode;
     extern bool offlineDbAutoCheckOnStartup;
     extern bool verboseInstallLogging;
 
-    struct ShopProfile {
+    struct RemoteProfile {
         std::string fileName;
         std::string protocol;
         std::string host;
@@ -63,13 +66,13 @@ namespace inst::config {
 
     int DefaultPortForProtocol(const std::string& protocol);
     std::string NormalizeHttpUserAgentMode(const std::string& mode);
-    std::string NormalizeShopPath(const std::string& path);
-    bool ParseShopUrl(const std::string& rawUrl, std::string& protocol, std::string& host, int& port, std::string& path);
-    std::string BuildShopUrl(const ShopProfile& shop);
-    std::vector<ShopProfile> LoadShops();
-    bool SaveShop(const ShopProfile& shop, std::string* error = nullptr);
-    bool DeleteShop(const std::string& fileName);
-    bool SetActiveShop(const ShopProfile& shop, bool writeConfig = true);
+    std::string NormalizeRemotePath(const std::string& path);
+    bool ParseRemoteUrl(const std::string& rawUrl, std::string& protocol, std::string& host, int& port, std::string& path);
+    std::string BuildRemoteUrl(const RemoteProfile& remote);
+    std::vector<RemoteProfile> LoadRemotes();
+    bool SaveRemote(const RemoteProfile& remote, std::string* error = nullptr);
+    bool DeleteRemote(const std::string& fileName);
+    bool SetActiveRemote(const RemoteProfile& remote, bool writeConfig = true);
 
     void setConfig();
     void parseConfig();

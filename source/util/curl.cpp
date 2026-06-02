@@ -82,7 +82,7 @@ namespace inst::curl {
 
 static void buildVersionAndRevision(std::string& outVersion, std::string& outRevision)
 {
-    const std::string raw = inst::config::shopLegacyMode ? "20.0.2" : inst::config::appVersion;
+    const std::string raw = inst::config::remoteLegacyMode ? "20.0.2" : inst::config::appVersion;
     outVersion = raw.empty() ? "0.0" : raw;
     outRevision = "0";
 
@@ -112,7 +112,7 @@ static void buildVersionAndRevision(std::string& outVersion, std::string& outRev
         outRevision = revisionToken.substr(0, digitsEnd);
 }
 
-static std::vector<std::string> buildShopHeaders(const std::string& requestUrl, const std::string& user, const std::string& pass)
+static std::vector<std::string> buildRemoteHeaders(const std::string& requestUrl, const std::string& user, const std::string& pass)
 {
     std::string themeHeader = "Theme: 0000000000000000000000000000000000000000000000000000000000000000";
     std::string versionValue;
@@ -120,7 +120,7 @@ static std::vector<std::string> buildShopHeaders(const std::string& requestUrl, 
     buildVersionAndRevision(versionValue, revisionValue);
     std::string versionHeader = "Version: " + versionValue;
     std::string revisionHeader = "Revision: " + revisionValue;
-    std::string languageHeader = "Language: " + Language::GetShopHeaderLanguage();
+    std::string languageHeader = "Language: " + Language::GetRemoteHeaderLanguage();
     std::string hauthHeader = "HAUTH: " + inst::util::ComputeHauthFromUrl(requestUrl);
     std::string uauthHeader = "UAUTH: " + inst::util::ComputeUauthFromUrl(requestUrl, user, pass);
     std::string uidHeader = "UID: " + inst::util::ComputeUidFromMmcCid();
@@ -500,7 +500,7 @@ namespace inst::curl {
         curl_easy_setopt(curl_handle, CURLOPT_FAILONERROR, 1L);
 
         struct curl_slist* headerList = nullptr;
-        const auto headers = buildShopHeaders(ourUrl, user, pass);
+        const auto headers = buildRemoteHeaders(ourUrl, user, pass);
         for (const auto& header : headers)
             headerList = curl_slist_append(headerList, header.c_str());
         if (headerList)
@@ -556,7 +556,7 @@ namespace inst::curl {
         curl_easy_setopt(curl_handle, CURLOPT_FAILONERROR, 1L);
 
         struct curl_slist* headerList = nullptr;
-        const auto headers = buildShopHeaders(ourUrl, user, pass);
+        const auto headers = buildRemoteHeaders(ourUrl, user, pass);
         for (const auto& header : headers)
             headerList = curl_slist_append(headerList, header.c_str());
         if (headerList)

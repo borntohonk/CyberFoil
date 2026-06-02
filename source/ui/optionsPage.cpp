@@ -13,7 +13,7 @@
 #include "util/unzip.hpp"
 #include "util/lang.hpp"
 #include "ui/instPage.hpp"
-#include "shopInstall.hpp"
+#include "remoteInstall.hpp"
 #include "ui/bottomHint.hpp"
 
 #define COLOR(hex) pu::ui::Color::FromHex(hex)
@@ -21,14 +21,14 @@
 namespace inst::ui {
     extern MainApplication *mainApp;
 
-    std::vector<std::string> languageStrings = {"English", "日本語", "Français", "Deutsch", "Italiano", "Español", "Português", "한국어", "Русский", "簡体中文","繁體中文"};
+    std::vector<std::string> languageStrings = {"English", "日本語", "Français", "Deutsch", "Italiano", "Español", "Português", "Korean", "Русский", "簡体中文","繁體中文"};
 
     namespace {
-        bool IsActiveShop(const inst::config::ShopProfile& shop)
+        bool IsActiveRemote(const inst::config::RemoteProfile& remote)
         {
-            return inst::config::BuildShopUrl(shop) == inst::config::shopUrl &&
-                   shop.username == inst::config::shopUser &&
-                   shop.password == inst::config::shopPass;
+            return inst::config::BuildRemoteUrl(remote) == inst::config::remoteUrl &&
+                   remote.username == inst::config::remoteUser &&
+                   remote.password == inst::config::remotePass;
         }
 
         std::string TrimString(const std::string& value)
@@ -42,35 +42,35 @@ namespace inst::ui {
             return value.substr(start, (end - start) + 1);
         }
 
-        std::string ActiveShopLabel(const std::vector<inst::config::ShopProfile>& shops)
+        std::string ActiveRemoteLabel(const std::vector<inst::config::RemoteProfile>& remotes)
         {
-            for (const auto& shop : shops) {
-                if (!IsActiveShop(shop))
+            for (const auto& remote : remotes) {
+                if (!IsActiveRemote(remote))
                     continue;
-                if (shop.favourite)
-                    return "* " + shop.title;
-                return shop.title;
+                if (remote.favourite)
+                    return "* " + remote.title;
+                return remote.title;
             }
 
-            if (!inst::config::shopUrl.empty())
-                return inst::util::shortenString(inst::config::shopUrl, 42, false);
+            if (!inst::config::remoteUrl.empty())
+                return inst::util::shortenString(inst::config::remoteUrl, 42, false);
             return "-";
         }
 
-        std::vector<std::string> BuildShopChoices(const std::vector<inst::config::ShopProfile>& shops)
+        std::vector<std::string> BuildRemoteChoices(const std::vector<inst::config::RemoteProfile>& remotes)
         {
             std::vector<std::string> labels;
-            labels.reserve(shops.size());
-            for (const auto& shop : shops) {
-                std::string label = (shop.favourite ? "* " : "") + shop.title;
-                if (IsActiveShop(shop))
+            labels.reserve(remotes.size());
+            for (const auto& remote : remotes) {
+                std::string label = (remote.favourite ? "* " : "") + remote.title;
+                if (IsActiveRemote(remote))
                     label += " (Active)";
                 labels.push_back(label);
             }
             return labels;
         }
 
-        bool ShopInputHasExplicitPort(const std::string& value)
+        bool RemoteInputHasExplicitPort(const std::string& value)
         {
             std::string input = TrimString(value);
             if (input.rfind("https://", 0) == 0) {
@@ -103,60 +103,60 @@ namespace inst::ui {
                    colonPos + 1 < input.size();
         }
 
-        bool PromptForShopDetails(inst::config::ShopProfile& shop)
+        bool PromptForRemoteDetails(inst::config::RemoteProfile& remote)
         {
-            std::string shopTitle = TrimString(inst::util::softwareKeyboard("Enter shop title (required)", shop.title, 80));
-            if (shopTitle.empty()) {
-                inst::ui::mainApp->CreateShowDialog("Invalid shop", "Title is required.", {"common.ok"_lang}, true);
+            std::string remoteTitle = TrimString(inst::util::softwareKeyboard("Enter Remote title (required)", remote.title, 80));
+            if (remoteTitle.empty()) {
+                inst::ui::mainApp->CreateShowDialog("Invalid Remote", "Title is required.", {"common.ok"_lang}, true);
                 return false;
             }
 
-            int protocolChoice = inst::ui::mainApp->CreateShowDialog("Shop protocol", "Choose the protocol used by this shop.", {"HTTP", "HTTPS"}, false);
+            int protocolChoice = inst::ui::mainApp->CreateShowDialog("Remote protocol", "Choose the protocol used by this Remote.", {"HTTP", "HTTPS"}, false);
             if (protocolChoice < 0)
                 return false;
-            shop.protocol = (protocolChoice == 1) ? "https" : "http";
+            remote.protocol = (protocolChoice == 1) ? "https" : "http";
 
-            std::string endpointInput = TrimString(inst::util::softwareKeyboard("Enter shop host or IP", shop.host, 200));
+            std::string endpointInput = TrimString(inst::util::softwareKeyboard("Enter Remote host or IP", remote.host, 200));
             if (endpointInput.empty()) {
-                inst::ui::mainApp->CreateShowDialog("Invalid shop", "Host is required.", {"common.ok"_lang}, true);
+                inst::ui::mainApp->CreateShowDialog("Invalid Remote", "Host is required.", {"common.ok"_lang}, true);
                 return false;
             }
 
             const bool hasScheme = endpointInput.rfind("http://", 0) == 0 || endpointInput.rfind("https://", 0) == 0;
-            std::string rawEndpoint = hasScheme ? endpointInput : (shop.protocol + "://" + endpointInput);
+            std::string rawEndpoint = hasScheme ? endpointInput : (remote.protocol + "://" + endpointInput);
             std::string parsedProtocol;
             std::string parsedHost;
             std::string parsedPath;
-            int parsedPort = inst::config::DefaultPortForProtocol(shop.protocol);
-            if (!inst::config::ParseShopUrl(rawEndpoint, parsedProtocol, parsedHost, parsedPort, parsedPath) || parsedHost.empty()) {
-                inst::ui::mainApp->CreateShowDialog("Invalid shop", "Host format is invalid.", {"common.ok"_lang}, true);
+            int parsedPort = inst::config::DefaultPortForProtocol(remote.protocol);
+            if (!inst::config::ParseRemoteUrl(rawEndpoint, parsedProtocol, parsedHost, parsedPort, parsedPath) || parsedHost.empty()) {
+                inst::ui::mainApp->CreateShowDialog("Invalid Remote", "Host format is invalid.", {"common.ok"_lang}, true);
                 return false;
             }
 
-            shop.protocol = parsedProtocol;
+            remote.protocol = parsedProtocol;
 
-            std::string pathDefault = !parsedPath.empty() ? parsedPath : shop.path;
-            std::string shopPath = TrimString(inst::util::softwareKeyboard("Enter shop path (optional, e.g. /shop)", pathDefault, 200));
-            shopPath = inst::config::NormalizeShopPath(shopPath);
+            std::string pathDefault = !parsedPath.empty() ? parsedPath : remote.path;
+            std::string remotePath = TrimString(inst::util::softwareKeyboard("Enter Remote path (optional, e.g. /remote)", pathDefault, 200));
+            remotePath = inst::config::NormalizeRemotePath(remotePath);
 
-            const int defaultPort = inst::config::DefaultPortForProtocol(shop.protocol);
-            int currentPort = shop.port;
+            const int defaultPort = inst::config::DefaultPortForProtocol(remote.protocol);
+            int currentPort = remote.port;
             if (currentPort <= 0 || currentPort > 65535)
                 currentPort = defaultPort;
-            if (ShopInputHasExplicitPort(endpointInput))
+            if (RemoteInputHasExplicitPort(endpointInput))
                 currentPort = parsedPort;
-            int shopPort = currentPort;
+            int remotePort = currentPort;
 
             std::string defaultPortLabel = "Use default (" + std::to_string(defaultPort) + ")";
             std::string keepPortLabel = "Keep current (" + std::to_string(currentPort) + ")";
-            int portMode = inst::ui::mainApp->CreateShowDialog("Shop port", "Pick which port to use.", {defaultPortLabel, "Custom", keepPortLabel}, false);
+            int portMode = inst::ui::mainApp->CreateShowDialog("Remote port", "Pick which port to use.", {defaultPortLabel, "Custom", keepPortLabel}, false);
             if (portMode < 0)
                 return false;
             if (portMode == 0) {
-                shopPort = defaultPort;
+                remotePort = defaultPort;
             } else if (portMode == 1) {
                 std::string currentPortText = std::to_string(currentPort);
-                std::string portText = TrimString(inst::util::softwareKeyboard("Enter shop port (1-65535)", currentPortText, 6));
+                std::string portText = TrimString(inst::util::softwareKeyboard("Enter Remote port (1-65535)", currentPortText, 6));
                 if (portText.empty()) {
                     inst::ui::mainApp->CreateShowDialog("Invalid port", "Port is required in custom mode.", {"common.ok"_lang}, true);
                     return false;
@@ -165,22 +165,22 @@ namespace inst::ui {
                     int parsedCustomPort = std::stoi(portText);
                     if (parsedCustomPort <= 0 || parsedCustomPort > 65535)
                         throw std::out_of_range("port");
-                    shopPort = parsedCustomPort;
+                    remotePort = parsedCustomPort;
                 } catch (...) {
                     inst::ui::mainApp->CreateShowDialog("Invalid port", "Port must be between 1 and 65535.", {"common.ok"_lang}, true);
                     return false;
                 }
             }
 
-            std::string shopUser = inst::util::softwareKeyboard("options.shop.user_hint"_lang, shop.username, 100);
-            std::string shopPass = inst::util::softwareKeyboard("options.shop.pass_hint"_lang, shop.password, 100);
+            std::string remoteUser = inst::util::softwareKeyboard("options.remote.user_hint"_lang, remote.username, 100);
+            std::string remotePass = inst::util::softwareKeyboard("options.remote.pass_hint"_lang, remote.password, 100);
 
-            shop.title = shopTitle;
-            shop.host = parsedHost;
-            shop.path = shopPath;
-            shop.port = shopPort;
-            shop.username = shopUser;
-            shop.password = shopPass;
+            remote.title = remoteTitle;
+            remote.host = parsedHost;
+            remote.path = remotePath;
+            remote.port = remotePort;
+            remote.username = remoteUser;
+            remote.password = remotePass;
             return true;
         }
 
@@ -329,7 +329,7 @@ namespace inst::ui {
     }
 
     optionsPage::optionsPage() : Layout::Layout() {
-        if (inst::config::shopLegacyMode && inst::config::NormalizeHttpUserAgentMode(inst::config::httpUserAgentMode) != "tinfoil") {
+        if (inst::config::remoteLegacyMode && inst::config::NormalizeHttpUserAgentMode(inst::config::httpUserAgentMode) != "tinfoil") {
             inst::config::httpUserAgentMode = "tinfoil";
             inst::config::httpUserAgent.clear();
             inst::config::setConfig();
@@ -514,7 +514,7 @@ namespace inst::ui {
     }
 
     void optionsPage::setSectionNavText() {
-        static const std::vector<std::string> sectionLabels = {"General", "Shop", "System"};
+        static const std::vector<std::string> sectionLabels = {"General", "Remote", "System"};
         for (size_t i = 0; i < this->sectionTexts.size() && i < sectionLabels.size(); i++) {
             const bool selected = static_cast<int>(i) == this->selectedSection;
             this->sectionHighlights[i]->SetColor(selected
@@ -557,25 +557,25 @@ namespace inst::ui {
         }
 
         if (this->selectedSection == 1) {
-            std::vector<inst::config::ShopProfile> shops = inst::config::LoadShops();
+            std::vector<inst::config::RemoteProfile> remotes = inst::config::LoadRemotes();
             std::string dbVersion = inst::offline::dbupdate::GetInstalledVersion();
             if (dbVersion.empty())
                 dbVersion = "not installed";
             else
                 dbVersion = inst::util::shortenString(dbVersion, 24, false);
-            addItem("Active shop: " + inst::util::shortenString(ActiveShopLabel(shops), 42, false), false, false);
-            addItem("Memorized shops: " + std::to_string(shops.size()), false, false);
-            addItem("Add new shop", false, false);
-            const std::string uaMode = inst::config::shopLegacyMode ? "tinfoil" : inst::config::httpUserAgentMode;
+            addItem("Active Remote: " + inst::util::shortenString(ActiveRemoteLabel(remotes), 42, false), false, false);
+            addItem("Memorized Remotes: " + std::to_string(remotes.size()), false, false);
+            addItem("Add new Remote", false, false);
+            const std::string uaMode = inst::config::remoteLegacyMode ? "tinfoil" : inst::config::httpUserAgentMode;
             addItem("User-Agent profile: " + GetUserAgentProfileLabel(uaMode), false, false);
             auto items = this->menu->GetItems();
-            if (inst::config::shopLegacyMode && items.size() > 3 && items[3] != nullptr)
+            if (inst::config::remoteLegacyMode && items.size() > 3 && items[3] != nullptr)
                 items[3]->SetColor(COLOR("#FFFFFF88"));
-            addItem("Tinfoil Mode (legacy shop compatibility)", true, inst::config::shopLegacyMode);
-            addItem("options.menu_items.shop_hide_installed"_lang, true, inst::config::shopHideInstalled);
-            addItem("options.menu_items.shop_hide_installed_section"_lang, true, inst::config::shopHideInstalledSection);
-            addItem("options.menu_items.shop_all_base_only"_lang, true, inst::config::shopAllBaseOnly);
-            addItem("options.menu_items.shop_start_grid_mode"_lang, true, inst::config::shopStartGridMode);
+            addItem("Tinfoil Mode (legacy Remote compatibility)", true, inst::config::remoteLegacyMode);
+            addItem("options.menu_items.remote_hide_installed"_lang, true, inst::config::remoteHideInstalled);
+            addItem("options.menu_items.remote_hide_installed_section"_lang, true, inst::config::remoteHideInstalledSection);
+            addItem("options.menu_items.remote_all_base_only"_lang, true, inst::config::remoteAllBaseOnly);
+            addItem("options.menu_items.remote_start_grid_mode"_lang, true, inst::config::remoteStartGridMode);
             addItem("Offline DB auto-check on startup", true, inst::config::offlineDbAutoCheckOnStartup);
             addItem("Offline DB update (" + dbVersion + ")", false, false);
             return;
@@ -777,9 +777,9 @@ namespace inst::ui {
                 if ((selectedIndex < 0) || (selectedIndex >= static_cast<int>(sizeof(kGeneralMap) / sizeof(kGeneralMap[0])))) return;
                 selectedIndex = kGeneralMap[selectedIndex];
             } else if (this->selectedSection == 1) {
-                static const int kShopMap[] = {9, 20, 21, 25, 26, 12, 13, 24, 19, 23, 22};
-                if ((selectedIndex < 0) || (selectedIndex >= static_cast<int>(sizeof(kShopMap) / sizeof(kShopMap[0])))) return;
-                selectedIndex = kShopMap[selectedIndex];
+                static const int kRemoteMap[] = {9, 20, 21, 25, 26, 12, 13, 24, 19, 23, 22};
+                if ((selectedIndex < 0) || (selectedIndex >= static_cast<int>(sizeof(kRemoteMap) / sizeof(kRemoteMap[0])))) return;
+                selectedIndex = kRemoteMap[selectedIndex];
             } else {
                 static const int kSystemMap[] = {4, 5, 16, 17, 18};
                 if ((selectedIndex < 0) || (selectedIndex >= static_cast<int>(sizeof(kSystemMap) / sizeof(kSystemMap[0])))) return;
@@ -829,8 +829,8 @@ namespace inst::ui {
                         mainApp->mainPage->appVersionText->SetX(480);
                         mainApp->netinstPage->titleImage->SetX(0);
                         mainApp->netinstPage->appVersionText->SetX(480);
-                        mainApp->shopinstPage->titleImage->SetX(0);
-                        mainApp->shopinstPage->appVersionText->SetX(480);
+                        mainApp->remoteinstPage->titleImage->SetX(0);
+                        mainApp->remoteinstPage->appVersionText->SetX(480);
                         mainApp->optionspage->titleImage->SetX(0);
                         mainApp->optionspage->appVersionText->SetX(480);
                         mainApp->sdinstPage->titleImage->SetX(0);
@@ -848,8 +848,8 @@ namespace inst::ui {
                         mainApp->mainPage->appVersionText->SetX(367);
                         mainApp->netinstPage->titleImage->SetX(-113);
                         mainApp->netinstPage->appVersionText->SetX(367);
-                        mainApp->shopinstPage->titleImage->SetX(-113);
-                        mainApp->shopinstPage->appVersionText->SetX(367);
+                        mainApp->remoteinstPage->titleImage->SetX(-113);
+                        mainApp->remoteinstPage->appVersionText->SetX(367);
                         mainApp->optionspage->titleImage->SetX(-113);
                         mainApp->optionspage->appVersionText->SetX(367);
                         mainApp->sdinstPage->titleImage->SetX(-113);
@@ -875,11 +875,11 @@ namespace inst::ui {
                         mainApp->sdinstPage = sdInstPage::New();
                         mainApp->netinstPage = netInstPage::New();
                         mainApp->usbinstPage = usbInstPage::New();
-                        mainApp->shopinstPage = shopInstPage::New();
+                        mainApp->remoteinstPage = remoteInstPage::New();
                         mainApp->optionspage = optionsPage::New();
                         mainApp->mainPage->SetOnInput(std::bind(&MainPage::onInput, mainApp->mainPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
                         mainApp->netinstPage->SetOnInput(std::bind(&netInstPage::onInput, mainApp->netinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
-                        mainApp->shopinstPage->SetOnInput(std::bind(&shopInstPage::onInput, mainApp->shopinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
+                        mainApp->remoteinstPage->SetOnInput(std::bind(&remoteInstPage::onInput, mainApp->remoteinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
                         mainApp->sdinstPage->SetOnInput(std::bind(&sdInstPage::onInput, mainApp->sdinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
                         mainApp->usbinstPage->SetOnInput(std::bind(&usbInstPage::onInput, mainApp->usbinstPage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
                         mainApp->instpage->SetOnInput(std::bind(&instPage::onInput, mainApp->instpage, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4));
@@ -893,76 +893,76 @@ namespace inst::ui {
                     this->refreshOptions();
                     break;
                 case 9: {
-                    std::vector<inst::config::ShopProfile> shops = inst::config::LoadShops();
-                    if (shops.empty()) {
-                        inst::ui::mainApp->CreateShowDialog("Active shop", "No memorized shops found. Add one first.", {"common.ok"_lang}, true);
+                    std::vector<inst::config::RemoteProfile> remotes = inst::config::LoadRemotes();
+                    if (remotes.empty()) {
+                        inst::ui::mainApp->CreateShowDialog("Active Remote", "No memorized Remotes found. Add one first.", {"common.ok"_lang}, true);
                         break;
                     }
-                    std::vector<std::string> choices = BuildShopChoices(shops);
-                    int selectedShop = inst::ui::mainApp->CreateShowDialog("Active shop", "Choose which memorized shop to use.", choices, false);
-                    if (selectedShop < 0 || selectedShop >= static_cast<int>(shops.size()))
+                    std::vector<std::string> choices = BuildRemoteChoices(remotes);
+                    int selectedRemote = inst::ui::mainApp->CreateShowDialog("Active Remote", "Choose which memorized Remote to use.", choices, false);
+                    if (selectedRemote < 0 || selectedRemote >= static_cast<int>(remotes.size()))
                         break;
-                    if (inst::config::SetActiveShop(shops[selectedShop], true))
+                    if (inst::config::SetActiveRemote(remotes[selectedRemote], true))
                         this->refreshOptions();
                     break;
                 }
                 case 20: {
-                    std::vector<inst::config::ShopProfile> shops = inst::config::LoadShops();
-                    if (shops.empty()) {
-                        inst::ui::mainApp->CreateShowDialog("Memorized shops", "No memorized shops found.", {"common.ok"_lang}, true);
+                    std::vector<inst::config::RemoteProfile> remotes = inst::config::LoadRemotes();
+                    if (remotes.empty()) {
+                        inst::ui::mainApp->CreateShowDialog("Memorized Remotes", "No memorized Remotes found.", {"common.ok"_lang}, true);
                         break;
                     }
 
-                    std::vector<std::string> choices = BuildShopChoices(shops);
-                    int selectedShop = inst::ui::mainApp->CreateShowDialog("Memorized shops", "Select one to manage.", choices, false);
-                    if (selectedShop < 0 || selectedShop >= static_cast<int>(shops.size()))
+                    std::vector<std::string> choices = BuildRemoteChoices(remotes);
+                    int selectedRemote = inst::ui::mainApp->CreateShowDialog("Memorized Remotes", "Select one to manage.", choices, false);
+                    if (selectedRemote < 0 || selectedRemote >= static_cast<int>(remotes.size()))
                         break;
 
-                    auto selected = shops[selectedShop];
+                    auto selected = remotes[selectedRemote];
                     std::string favouriteLabel = selected.favourite ? "Unset favourite" : "Set favourite";
                     int action = inst::ui::mainApp->CreateShowDialog(
                         selected.title,
-                        "Choose an action for this shop.",
-                        {"Use this shop", "Edit shop", favouriteLabel, "Delete shop", "Cancel"},
+                        "Choose an action for this Remote.",
+                        {"Use this Remote", "Edit Remote", favouriteLabel, "Delete Remote", "Cancel"},
                         false
                     );
 
                     if (action == 0) {
-                        if (inst::config::SetActiveShop(selected, true))
+                        if (inst::config::SetActiveRemote(selected, true))
                             this->refreshOptions();
                     } else if (action == 1) {
-                        const bool wasActive = IsActiveShop(selected);
-                        inst::config::ShopProfile edited = selected;
-                        if (!PromptForShopDetails(edited))
+                        const bool wasActive = IsActiveRemote(selected);
+                        inst::config::RemoteProfile edited = selected;
+                        if (!PromptForRemoteDetails(edited))
                             break;
 
                         std::string error;
-                        if (!inst::config::SaveShop(edited, &error)) {
-                            inst::ui::mainApp->CreateShowDialog("Failed to save shop", error.empty() ? "Unknown error." : error, {"common.ok"_lang}, true);
+                        if (!inst::config::SaveRemote(edited, &error)) {
+                            inst::ui::mainApp->CreateShowDialog("Failed to save Remote", error.empty() ? "Unknown error." : error, {"common.ok"_lang}, true);
                             break;
                         }
 
                         if (wasActive)
-                            inst::config::SetActiveShop(edited, true);
+                            inst::config::SetActiveRemote(edited, true);
                         this->refreshOptions();
                     } else if (action == 2) {
                         selected.favourite = !selected.favourite;
                         std::string error;
-                        if (!inst::config::SaveShop(selected, &error))
-                            inst::ui::mainApp->CreateShowDialog("Failed to save shop", error.empty() ? "Unknown error." : error, {"common.ok"_lang}, true);
+                        if (!inst::config::SaveRemote(selected, &error))
+                            inst::ui::mainApp->CreateShowDialog("Failed to save Remote", error.empty() ? "Unknown error." : error, {"common.ok"_lang}, true);
                         else
                             this->refreshOptions();
                     } else if (action == 3) {
-                        int confirmDelete = inst::ui::mainApp->CreateShowDialog("Delete shop?", "This cannot be undone.", {"Delete", "common.cancel"_lang}, false);
+                        int confirmDelete = inst::ui::mainApp->CreateShowDialog("Delete Remote?", "This cannot be undone.", {"Delete", "common.cancel"_lang}, false);
                         if (confirmDelete == 0) {
-                            if (!inst::config::DeleteShop(selected.fileName)) {
-                                inst::ui::mainApp->CreateShowDialog("Failed to delete shop", "Could not remove the shop file.", {"common.ok"_lang}, true);
+                            if (!inst::config::DeleteRemote(selected.fileName)) {
+                                inst::ui::mainApp->CreateShowDialog("Failed to delete Remote", "Could not remove the Remote file.", {"common.ok"_lang}, true);
                                 break;
                             }
-                            if (IsActiveShop(selected)) {
-                                inst::config::shopUrl.clear();
-                                inst::config::shopUser.clear();
-                                inst::config::shopPass.clear();
+                            if (IsActiveRemote(selected)) {
+                                inst::config::remoteUrl.clear();
+                                inst::config::remoteUser.clear();
+                                inst::config::remotePass.clear();
                                 inst::config::setConfig();
                             }
                             this->refreshOptions();
@@ -971,28 +971,28 @@ namespace inst::ui {
                     break;
                 }
                 case 21: {
-                    inst::config::ShopProfile newShop;
-                    if (!PromptForShopDetails(newShop))
+                    inst::config::RemoteProfile newRemote;
+                    if (!PromptForRemoteDetails(newRemote))
                         break;
 
-                    int favouriteChoice = inst::ui::mainApp->CreateShowDialog("Favourite shop", "Keep this shop at the top of the list?", {"common.no"_lang, "common.yes"_lang}, false);
+                    int favouriteChoice = inst::ui::mainApp->CreateShowDialog("Favourite Remote", "Keep this Remote at the top of the list?", {"common.no"_lang, "common.yes"_lang}, false);
                     if (favouriteChoice < 0)
                         break;
 
-                    newShop.favourite = (favouriteChoice == 1);
+                    newRemote.favourite = (favouriteChoice == 1);
 
                     std::string error;
-                    if (!inst::config::SaveShop(newShop, &error)) {
-                        inst::ui::mainApp->CreateShowDialog("Failed to save shop", error.empty() ? "Unknown error." : error, {"common.ok"_lang}, true);
+                    if (!inst::config::SaveRemote(newRemote, &error)) {
+                        inst::ui::mainApp->CreateShowDialog("Failed to save Remote", error.empty() ? "Unknown error." : error, {"common.ok"_lang}, true);
                         break;
                     }
 
-                    inst::config::SetActiveShop(newShop, true);
+                    inst::config::SetActiveRemote(newRemote, true);
                     this->refreshOptions();
                     break;
                 }
                 case 25: {
-                    if (inst::config::shopLegacyMode) {
+                    if (inst::config::remoteLegacyMode) {
                         inst::ui::mainApp->CreateShowDialog("User-Agent profile", "Locked to Tinfoil while Tinfoil Mode is enabled.", {"common.ok"_lang}, true);
                         break;
                     }
@@ -1011,7 +1011,7 @@ namespace inst::ui {
                     const std::string currentLabel = profiles[currentIndex];
                     int profileChoice = inst::ui::mainApp->CreateShowDialog(
                         "User-Agent profile",
-                        "Used for file/media downloads. Shop API always uses CyberFoil.",
+                        "Used for file/media downloads. Remote API always uses CyberFoil.",
                         profiles,
                         false
                     );
@@ -1046,13 +1046,13 @@ namespace inst::ui {
                     break;
                 }
                 case 12:
-                    inst::config::shopHideInstalled = !inst::config::shopHideInstalled;
+                    inst::config::remoteHideInstalled = !inst::config::remoteHideInstalled;
                     inst::config::setConfig();
                     this->refreshOptions();
                     break;
                 case 26:
-                    inst::config::shopLegacyMode = !inst::config::shopLegacyMode;
-                    if (inst::config::shopLegacyMode) {
+                    inst::config::remoteLegacyMode = !inst::config::remoteLegacyMode;
+                    if (inst::config::remoteLegacyMode) {
                         inst::config::httpUserAgentMode = "tinfoil";
                         inst::config::httpUserAgent.clear();
                     } else {
@@ -1063,12 +1063,12 @@ namespace inst::ui {
                     this->refreshOptions();
                     break;
                 case 13:
-                    inst::config::shopHideInstalledSection = !inst::config::shopHideInstalledSection;
+                    inst::config::remoteHideInstalledSection = !inst::config::remoteHideInstalledSection;
                     inst::config::setConfig();
                     this->refreshOptions();
                     break;
                 case 24:
-                    inst::config::shopAllBaseOnly = !inst::config::shopAllBaseOnly;
+                    inst::config::remoteAllBaseOnly = !inst::config::remoteAllBaseOnly;
                     inst::config::setConfig();
                     this->refreshOptions();
                     break;
@@ -1137,7 +1137,7 @@ namespace inst::ui {
                     break;
                 }
                 case 19:
-                    inst::config::shopStartGridMode = !inst::config::shopStartGridMode;
+                    inst::config::remoteStartGridMode = !inst::config::remoteStartGridMode;
                     inst::config::setConfig();
                     this->refreshOptions();
                     break;

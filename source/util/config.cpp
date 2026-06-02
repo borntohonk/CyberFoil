@@ -12,9 +12,9 @@ namespace inst::config {
     std::string gAuthKey;
     std::string lastNetUrl;
     std::string offlineDbManifestUrl;
-    std::string shopUrl;
-    std::string shopUser;
-    std::string shopPass;
+    std::string remoteUrl;
+    std::string remoteUser;
+    std::string remotePass;
     std::string httpUserAgentMode;
     std::string httpUserAgent;
     std::vector<std::string> updateInfo;
@@ -29,11 +29,11 @@ namespace inst::config {
     bool overClock;
     bool usbAck;
     bool validateNCAs;
-    bool shopHideInstalled;
-    bool shopHideInstalledSection;
-    bool shopAllBaseOnly;
-    bool shopLegacyMode;
-    bool shopStartGridMode;
+    bool remoteHideInstalled;
+    bool remoteHideInstalledSection;
+    bool remoteAllBaseOnly;
+    bool remoteLegacyMode;
+    bool remoteStartGridMode;
     bool offlineDbAutoCheckOnStartup;
     bool verboseInstallLogging;
 
@@ -70,12 +70,17 @@ namespace inst::config {
             return normalizedProtocol == "https" ? 443 : 8465;
         }
 
-        bool EnsureShopsDirectory()
+        bool EnsureRemotesDirectory()
         {
             std::error_code ec;
-            if (std::filesystem::exists(inst::config::shopsDir, ec))
-                return std::filesystem::is_directory(inst::config::shopsDir, ec);
-            return std::filesystem::create_directories(inst::config::shopsDir, ec);
+            if (std::filesystem::exists(inst::config::remotesDir, ec))
+                return std::filesystem::is_directory(inst::config::remotesDir, ec);
+            return std::filesystem::create_directories(inst::config::remotesDir, ec);
+        }
+
+        std::string RemoteDedupKey(const inst::config::RemoteProfile& remote)
+        {
+            return inst::config::BuildRemoteUrl(remote) + "\x1f" + Trim(remote.username) + "\x1f" + Trim(remote.password);
         }
 
         bool ParseBoolTextValue(const std::string& value, bool& out)
@@ -132,7 +137,7 @@ namespace inst::config {
                     stem.push_back('_');
             }
             if (stem.empty())
-                stem = "Shop";
+                stem = "Remote";
             return stem;
         }
 
@@ -141,25 +146,25 @@ namespace inst::config {
             const std::string base = SanitizeTitleStem(title);
             std::string candidate = base + ".json";
             int suffix = 2;
-            while (std::filesystem::exists(inst::config::shopsDir + "/" + candidate)) {
+            while (std::filesystem::exists(inst::config::remotesDir + "/" + candidate)) {
                 candidate = base + "_" + std::to_string(suffix) + ".json";
                 suffix++;
             }
             return candidate;
         }
 
-        nlohmann::json BuildShopJson(const inst::config::ShopProfile& shop)
+        nlohmann::json BuildRemoteJson(const inst::config::RemoteProfile& remote)
         {
-            inst::config::ShopProfile normalized = shop;
+            inst::config::RemoteProfile normalized = remote;
             normalized.protocol = NormalizeProtocol(normalized.protocol);
             normalized.host = Trim(normalized.host);
-            normalized.path = inst::config::NormalizeShopPath(normalized.path);
+            normalized.path = inst::config::NormalizeRemotePath(normalized.path);
             normalized.title = Trim(normalized.title);
             if (normalized.port <= 0 || normalized.port > 65535)
                 normalized.port = DefaultPortForNormalizedProtocol(normalized.protocol);
 
             return {
-                {"shop", {
+                {"remote", {
                     {"protocol", normalized.protocol},
                     {"host", normalized.host},
                     {"path", normalized.path},
@@ -172,7 +177,7 @@ namespace inst::config {
             };
         }
 
-        bool ParseShopUrlImpl(const std::string& rawUrl, std::string& protocol, std::string& host, int& port, std::string& path)
+        bool ParseRemoteUrlImpl(const std::string& rawUrl, std::string& protocol, std::string& host, int& port, std::string& path)
         {
             std::string url = Trim(rawUrl);
             if (url.empty())
@@ -197,7 +202,7 @@ namespace inst::config {
                 authorityEnd = queryPos;
 
             if (slashPos != std::string::npos && slashPos == authorityEnd)
-                path = inst::config::NormalizeShopPath(url.substr(slashPos));
+                path = inst::config::NormalizeRemotePath(url.substr(slashPos));
             if (authorityEnd != std::string::npos)
                 url = url.substr(0, authorityEnd);
 
@@ -240,7 +245,7 @@ namespace inst::config {
             return true;
         }
 
-        bool ParseShopFile(const std::filesystem::path& path, inst::config::ShopProfile& outShop, bool* outNeedsRewrite = nullptr)
+        bool ParseRemoteFile(const std::filesystem::path& path, inst::config::RemoteProfile& outRemote, bool* outNeedsRewrite = nullptr)
         {
             std::ifstream file(path);
             if (!file)
@@ -258,22 +263,32 @@ namespace inst::config {
                 return false;
 
             bool needsRewrite = false;
-            const nlohmann::json* shopNode = &root;
-            if (root.contains("shop")) {
+            const nlohmann::json* remoteNode = &root;
+            if (root.contains("remote")) {
+                if (!root["remote"].is_object())
+                    return false;
+                remoteNode = &root["remote"];
+            } else if (root.contains("shop")) {
                 if (!root["shop"].is_object())
                     return false;
-                shopNode = &root["shop"];
+                remoteNode = &root["shop"];
+                needsRewrite = true;
+            } else if (root.contains("shops")) {
+                if (!root["shops"].is_object())
+                    return false;
+                remoteNode = &root["shops"];
+                needsRewrite = true;
             } else {
                 needsRewrite = true;
             }
 
             try {
-                inst::config::ShopProfile parsed;
+                inst::config::RemoteProfile parsed;
                 parsed.protocol = "http";
                 parsed.port = DefaultPortForNormalizedProtocol(parsed.protocol);
                 parsed.favourite = false;
 
-                const std::string rawProtocol = shopNode->value("protocol", "http");
+                const std::string rawProtocol = remoteNode->value("protocol", "http");
                 parsed.protocol = NormalizeProtocol(rawProtocol);
                 if (parsed.protocol != Trim(rawProtocol))
                     needsRewrite = true;
@@ -284,8 +299,8 @@ namespace inst::config {
                 std::string parsedUrlPath;
                 int parsedUrlPort = DefaultPortForNormalizedProtocol(parsed.protocol);
 
-                if (shopNode->contains("url") && (*shopNode)["url"].is_string()) {
-                    if (ParseShopUrlImpl((*shopNode)["url"].get<std::string>(), parsedUrlProtocol, parsedUrlHost, parsedUrlPort, parsedUrlPath)) {
+                if (remoteNode->contains("url") && (*remoteNode)["url"].is_string()) {
+                    if (ParseRemoteUrlImpl((*remoteNode)["url"].get<std::string>(), parsedUrlProtocol, parsedUrlHost, parsedUrlPort, parsedUrlPath)) {
                         parsed.protocol = parsedUrlProtocol;
                         parsed.port = parsedUrlPort;
                         parsed.host = parsedUrlHost;
@@ -295,26 +310,26 @@ namespace inst::config {
                 }
 
                 if (parsed.host.empty())
-                    parsed.host = shopNode->value("host", "");
+                    parsed.host = remoteNode->value("host", "");
                 if (parsed.path.empty())
-                    parsed.path = NormalizeShopPath(shopNode->value("path", ""));
-                parsed.username = shopNode->value("username", "");
-                parsed.password = shopNode->value("password", "");
-                parsed.title = shopNode->value("title", "");
+                    parsed.path = NormalizeRemotePath(remoteNode->value("path", ""));
+                parsed.username = remoteNode->value("username", "");
+                parsed.password = remoteNode->value("password", "");
+                parsed.title = remoteNode->value("title", "");
 
-                if (!shopNode->contains("host") || !(*shopNode)["host"].is_string())
+                if (!remoteNode->contains("host") || !(*remoteNode)["host"].is_string())
                     needsRewrite = true;
-                if (!shopNode->contains("path") || !(*shopNode)["path"].is_string())
+                if (!remoteNode->contains("path") || !(*remoteNode)["path"].is_string())
                     needsRewrite = true;
-                if (!shopNode->contains("title") || !(*shopNode)["title"].is_string())
+                if (!remoteNode->contains("title") || !(*remoteNode)["title"].is_string())
                     needsRewrite = true;
-                if (!shopNode->contains("username") || !(*shopNode)["username"].is_string())
+                if (!remoteNode->contains("username") || !(*remoteNode)["username"].is_string())
                     needsRewrite = true;
-                if (!shopNode->contains("password") || !(*shopNode)["password"].is_string())
+                if (!remoteNode->contains("password") || !(*remoteNode)["password"].is_string())
                     needsRewrite = true;
 
-                if (shopNode->contains("port")) {
-                    const auto& portValue = (*shopNode)["port"];
+                if (remoteNode->contains("port")) {
+                    const auto& portValue = (*remoteNode)["port"];
                     int parsedPort = 0;
                     if (portValue.is_number_integer()) {
                         parsedPort = portValue.get<int>();
@@ -339,10 +354,10 @@ namespace inst::config {
                 const char* favouriteKeys[] = {"favourite", "favorite"};
                 bool sawFavourite = false;
                 for (const char* key : favouriteKeys) {
-                    if (!shopNode->contains(key))
+                    if (!remoteNode->contains(key))
                         continue;
                     sawFavourite = true;
-                    const auto& favouriteValue = (*shopNode)[key];
+                    const auto& favouriteValue = (*remoteNode)[key];
                     bool parsedFavourite = false;
                     if (favouriteValue.is_boolean()) {
                         parsed.favourite = favouriteValue.get<bool>();
@@ -369,7 +384,7 @@ namespace inst::config {
                     needsRewrite = true;
                 parsed.host = normalizedHost;
 
-                std::string normalizedPath = NormalizeShopPath(parsed.path);
+                std::string normalizedPath = NormalizeRemotePath(parsed.path);
                 if (normalizedPath != parsed.path)
                     needsRewrite = true;
                 parsed.path = normalizedPath;
@@ -390,7 +405,7 @@ namespace inst::config {
 
                 parsed.fileName = path.filename().string();
                 parsed.updatedAt = GetWriteTimestampSeconds(path);
-                outShop = parsed;
+                outRemote = parsed;
                 if (outNeedsRewrite != nullptr)
                     *outNeedsRewrite = needsRewrite;
                 return true;
@@ -399,29 +414,91 @@ namespace inst::config {
             }
         }
 
-        void MigrateLegacyShopFiles()
+        void MigrateLegacyRemoteFiles()
         {
+            const std::filesystem::path sourceDirs[] = {
+                std::filesystem::path(inst::config::remotesDir),
+                std::filesystem::path(inst::config::legacyShopsDir)
+            };
+
+            for (const auto& sourceDir : sourceDirs) {
+                std::error_code ec;
+                if (!std::filesystem::exists(sourceDir, ec) || !std::filesystem::is_directory(sourceDir, ec))
+                    continue;
+
+                for (const auto& entry : std::filesystem::directory_iterator(sourceDir, ec)) {
+                    if (ec)
+                        break;
+                    if (!entry.is_regular_file())
+                        continue;
+
+                    bool needsRewrite = false;
+                    inst::config::RemoteProfile parsed;
+                    if (!ParseRemoteFile(entry.path(), parsed, &needsRewrite))
+                        continue;
+                    if (!needsRewrite && sourceDir != std::filesystem::path(inst::config::legacyShopsDir))
+                        continue;
+
+                    parsed.fileName = entry.path().filename().string();
+                    std::string ignored;
+                    if (!inst::config::SaveRemote(parsed, &ignored))
+                        continue;
+
+                    if (sourceDir == std::filesystem::path(inst::config::legacyShopsDir)) {
+                        std::error_code removeEc;
+                        std::filesystem::remove(entry.path(), removeEc);
+                    }
+                }
+            }
+
+            std::error_code emptyCheckEc;
+            if (std::filesystem::exists(std::filesystem::path(inst::config::legacyShopsDir), emptyCheckEc) &&
+                std::filesystem::is_empty(std::filesystem::path(inst::config::legacyShopsDir), emptyCheckEc)) {
+                std::error_code removeDirEc;
+                std::filesystem::remove(std::filesystem::path(inst::config::legacyShopsDir), removeDirEc);
+            }
+        }
+
+        void MigrateLegacyRemoteIcons()
+        {
+            const std::filesystem::path legacyDir(inst::config::legacyShopIconsDir);
+            if (!std::filesystem::exists(legacyDir))
+                return;
+
             std::error_code ec;
-            for (const auto& entry : std::filesystem::directory_iterator(inst::config::shopsDir, ec)) {
+            std::filesystem::create_directories(inst::config::remoteIconsDir, ec);
+            if (ec)
+                return;
+
+            const std::filesystem::path newDir(inst::config::remoteIconsDir);
+            for (const auto& entry : std::filesystem::directory_iterator(legacyDir, ec)) {
                 if (ec)
                     break;
                 if (!entry.is_regular_file())
                     continue;
 
-                bool needsRewrite = false;
-                inst::config::ShopProfile parsed;
-                if (!ParseShopFile(entry.path(), parsed, &needsRewrite) || !needsRewrite)
-                    continue;
+                const std::filesystem::path destination = newDir / entry.path().filename();
+                std::error_code copyEc;
+                if (!std::filesystem::exists(destination)) {
+                    std::filesystem::copy_file(entry.path(), destination, std::filesystem::copy_options::none, copyEc);
+                    if (copyEc)
+                        continue;
+                }
 
-                parsed.fileName = entry.path().filename().string();
-                std::string ignored;
-                inst::config::SaveShop(parsed, &ignored);
+                std::error_code removeEc;
+                std::filesystem::remove(entry.path(), removeEc);
+            }
+
+            std::error_code emptyCheckEc;
+            if (std::filesystem::exists(legacyDir, emptyCheckEc) && std::filesystem::is_empty(legacyDir, emptyCheckEc)) {
+                std::error_code removeDirEc;
+                std::filesystem::remove(legacyDir, removeDirEc);
             }
         }
 
-        void SortShopProfiles(std::vector<inst::config::ShopProfile>& shops)
+        void SortRemoteProfiles(std::vector<inst::config::RemoteProfile>& remotes)
         {
-            std::sort(shops.begin(), shops.end(), [](const auto& a, const auto& b) {
+            std::sort(remotes.begin(), remotes.end(), [](const auto& a, const auto& b) {
                 if (a.favourite != b.favourite)
                     return a.favourite > b.favourite;
 
@@ -443,16 +520,16 @@ namespace inst::config {
             });
         }
 
-        void TryMigrateLegacyShopToJson()
+        void TryMigrateLegacyRemoteToJson()
         {
-            if (inst::config::shopUrl.empty())
+            if (inst::config::remoteUrl.empty())
                 return;
 
-            std::vector<inst::config::ShopProfile> shops = inst::config::LoadShops();
-            for (const auto& shop : shops) {
-                if (inst::config::BuildShopUrl(shop) == inst::config::shopUrl &&
-                    shop.username == inst::config::shopUser &&
-                    shop.password == inst::config::shopPass) {
+            std::vector<inst::config::RemoteProfile> remotes = inst::config::LoadRemotes();
+            for (const auto& remote : remotes) {
+                if (inst::config::BuildRemoteUrl(remote) == inst::config::remoteUrl &&
+                    remote.username == inst::config::remoteUser &&
+                    remote.password == inst::config::remotePass) {
                     return;
                 }
             }
@@ -461,21 +538,21 @@ namespace inst::config {
             std::string host;
             std::string path;
             int port = DefaultPortForProtocol("http");
-            if (!ParseShopUrl(inst::config::shopUrl, protocol, host, port, path))
+            if (!ParseRemoteUrl(inst::config::remoteUrl, protocol, host, port, path))
                 return;
 
-            inst::config::ShopProfile migrated;
+            inst::config::RemoteProfile migrated;
             migrated.protocol = protocol;
             migrated.host = host;
             migrated.path = path;
             migrated.port = port;
-            migrated.username = inst::config::shopUser;
-            migrated.password = inst::config::shopPass;
+            migrated.username = inst::config::remoteUser;
+            migrated.password = inst::config::remotePass;
             migrated.title = path.empty() ? host : (host + path);
             migrated.favourite = false;
 
             std::string ignored;
-            inst::config::SaveShop(migrated, &ignored);
+            inst::config::SaveRemote(migrated, &ignored);
         }
     }
 
@@ -500,7 +577,7 @@ namespace inst::config {
         return "default";
     }
 
-    std::string NormalizeShopPath(const std::string& value)
+    std::string NormalizeRemotePath(const std::string& value)
     {
         std::string normalized = Trim(value);
         if (normalized.empty())
@@ -520,49 +597,66 @@ namespace inst::config {
         return normalized == "/" ? "" : normalized;
     }
 
-    bool ParseShopUrl(const std::string& rawUrl, std::string& protocol, std::string& host, int& port, std::string& path)
+    bool ParseRemoteUrl(const std::string& rawUrl, std::string& protocol, std::string& host, int& port, std::string& path)
     {
-        return ParseShopUrlImpl(rawUrl, protocol, host, port, path);
+        return ParseRemoteUrlImpl(rawUrl, protocol, host, port, path);
     }
 
-    std::string BuildShopUrl(const ShopProfile& shop)
+    std::string BuildRemoteUrl(const RemoteProfile& remote)
     {
-        std::string host = Trim(shop.host);
+        std::string host = Trim(remote.host);
         if (host.empty())
             return "";
 
-        std::string protocol = NormalizeProtocol(shop.protocol);
-        std::string path = NormalizeShopPath(shop.path);
-        int port = shop.port;
+        std::string protocol = NormalizeProtocol(remote.protocol);
+        std::string path = NormalizeRemotePath(remote.path);
+        int port = remote.port;
         if (port <= 0 || port > 65535)
             port = DefaultPortForNormalizedProtocol(protocol);
 
         return protocol + "://" + host + ":" + std::to_string(port) + path;
     }
 
-    std::vector<ShopProfile> LoadShops()
+    std::vector<RemoteProfile> LoadRemotes()
     {
-        std::vector<ShopProfile> shops;
-        if (!EnsureShopsDirectory())
-            return shops;
+        std::vector<RemoteProfile> remotes;
+        if (!EnsureRemotesDirectory())
+            return remotes;
 
-        std::error_code ec;
-        for (const auto& entry : std::filesystem::directory_iterator(inst::config::shopsDir, ec)) {
-            if (ec)
-                break;
-            if (!entry.is_regular_file())
+        std::vector<std::string> seenKeys;
+        const std::filesystem::path sourceDirs[] = {
+            std::filesystem::path(inst::config::remotesDir),
+            std::filesystem::path(inst::config::legacyShopsDir)
+        };
+
+        for (const auto& sourceDir : sourceDirs) {
+            std::error_code ec;
+            if (!std::filesystem::exists(sourceDir, ec) || !std::filesystem::is_directory(sourceDir, ec))
                 continue;
 
-            ShopProfile parsed;
-            if (ParseShopFile(entry.path(), parsed))
-                shops.push_back(std::move(parsed));
+            for (const auto& entry : std::filesystem::directory_iterator(sourceDir, ec)) {
+                if (ec)
+                    break;
+                if (!entry.is_regular_file())
+                    continue;
+
+                RemoteProfile parsed;
+                if (!ParseRemoteFile(entry.path(), parsed))
+                    continue;
+
+                const std::string dedupKey = RemoteDedupKey(parsed);
+                if (std::find(seenKeys.begin(), seenKeys.end(), dedupKey) != seenKeys.end())
+                    continue;
+                seenKeys.push_back(dedupKey);
+                remotes.push_back(std::move(parsed));
+            }
         }
 
-        SortShopProfiles(shops);
-        return shops;
+        SortRemoteProfiles(remotes);
+        return remotes;
     }
 
-    bool SaveShop(const ShopProfile& shop, std::string* error)
+    bool SaveRemote(const RemoteProfile& remote, std::string* error)
     {
         auto fail = [error](const std::string& message) {
             if (error != nullptr)
@@ -570,13 +664,13 @@ namespace inst::config {
             return false;
         };
 
-        if (!EnsureShopsDirectory())
-            return fail("Failed to create shops directory.");
+        if (!EnsureRemotesDirectory())
+            return fail("Failed to create remotes directory.");
 
-        ShopProfile normalized = shop;
+        RemoteProfile normalized = remote;
         normalized.protocol = NormalizeProtocol(normalized.protocol);
         normalized.host = Trim(normalized.host);
-        normalized.path = NormalizeShopPath(normalized.path);
+        normalized.path = NormalizeRemotePath(normalized.path);
         normalized.title = Trim(normalized.title);
         if (normalized.port <= 0 || normalized.port > 65535)
             normalized.port = DefaultPortForNormalizedProtocol(normalized.protocol);
@@ -593,39 +687,49 @@ namespace inst::config {
             fileName += ".json";
         }
 
-        std::filesystem::path shopPath = std::filesystem::path(inst::config::shopsDir) / fileName;
-        std::ofstream file(shopPath, std::ios::out | std::ios::trunc);
+        std::filesystem::path remotePath = std::filesystem::path(inst::config::remotesDir) / fileName;
+        std::ofstream file(remotePath, std::ios::out | std::ios::trunc);
         if (!file)
-            return fail("Failed to open shop file for writing.");
+            return fail("Failed to open remote file for writing.");
 
-        nlohmann::json j = BuildShopJson(normalized);
+        nlohmann::json j = BuildRemoteJson(normalized);
 
         file << std::setw(4) << j << std::endl;
 
         if (!file.good())
-            return fail("Failed to write shop file.");
+            return fail("Failed to write remote file.");
 
         return true;
     }
 
-    bool DeleteShop(const std::string& fileName)
+    bool DeleteRemote(const std::string& fileName)
     {
         std::string sanitized = std::filesystem::path(fileName).filename().string();
         if (sanitized.empty())
             return false;
-        std::filesystem::path shopPath = std::filesystem::path(inst::config::shopsDir) / sanitized;
         std::error_code ec;
-        return std::filesystem::remove(shopPath, ec);
+        bool removed = false;
+        const std::filesystem::path dirs[] = {
+            std::filesystem::path(inst::config::remotesDir),
+            std::filesystem::path(inst::config::legacyShopsDir)
+        };
+
+        for (const auto& dir : dirs) {
+            std::filesystem::path remotePath = dir / sanitized;
+            removed = std::filesystem::remove(remotePath, ec) || removed;
+            ec.clear();
+        }
+        return removed;
     }
 
-    bool SetActiveShop(const ShopProfile& shop, bool writeConfig)
+    bool SetActiveRemote(const RemoteProfile& remote, bool writeConfig)
     {
-        std::string url = BuildShopUrl(shop);
+        std::string url = BuildRemoteUrl(remote);
         if (url.empty())
             return false;
-        inst::config::shopUrl = url;
-        inst::config::shopUser = shop.username;
-        inst::config::shopPass = shop.password;
+        inst::config::remoteUrl = url;
+        inst::config::remoteUser = remote.username;
+        inst::config::remotePass = remote.password;
         if (writeConfig)
             inst::config::setConfig();
         return true;
@@ -647,20 +751,20 @@ namespace inst::config {
             {"validateNCAs", validateNCAs},
             {"lastNetUrl", lastNetUrl},
             {"offlineDbManifestUrl", offlineDbManifestUrl},
-            {"shopUrl", shopUrl},
-            {"shopUser", shopUser},
-            {"shopPass", shopPass},
+            {"remoteUrl", remoteUrl},
+            {"remoteUser", remoteUser},
+            {"remotePass", remotePass},
             {"httpUserAgentMode", httpUserAgentMode},
             {"httpUserAgent", httpUserAgent},
-            {"shopHideInstalled", shopHideInstalled},
-            {"shopHideInstalledSection", shopHideInstalledSection},
-            {"shopAllBaseOnly", shopAllBaseOnly},
-            {"shopLegacyMode", shopLegacyMode},
-            {"shopStartGridMode", shopStartGridMode},
+            {"remoteHideInstalled", remoteHideInstalled},
+            {"remoteHideInstalledSection", remoteHideInstalledSection},
+            {"remoteAllBaseOnly", remoteAllBaseOnly},
+            {"remoteLegacyMode", remoteLegacyMode},
+            {"remoteStartGridMode", remoteStartGridMode},
             {"offlineDbAutoCheckOnStartup", offlineDbAutoCheckOnStartup},
             {"verboseInstallLogging", verboseInstallLogging},
-            {"shopRememberSelection", false},
-            {"shopSelection", nlohmann::json::array()}
+            {"remoteRememberSelection", false},
+            {"remoteSelection", nlohmann::json::array()}
         };
         std::ofstream file(inst::config::configPath);
         file << std::setw(4) << j << std::endl;
@@ -681,16 +785,16 @@ namespace inst::config {
         validateNCAs = true;
         lastNetUrl = "https://";
         offlineDbManifestUrl = "https://github.com/luketanti/CyberFoil-DB/releases/latest/download/offline_db_manifest.json";
-        shopUrl.clear();
-        shopUser.clear();
-        shopPass.clear();
+        remoteUrl.clear();
+        remoteUser.clear();
+        remotePass.clear();
         httpUserAgentMode = "default";
         httpUserAgent.clear();
-        shopHideInstalled = true;
-        shopHideInstalledSection = true;
-        shopAllBaseOnly = true;
-        shopLegacyMode = false;
-        shopStartGridMode = false;
+        remoteHideInstalled = true;
+        remoteHideInstalledSection = true;
+        remoteAllBaseOnly = true;
+        remoteLegacyMode = false;
+        remoteStartGridMode = false;
         offlineDbAutoCheckOnStartup = true;
         verboseInstallLogging = false;
         bool hasHttpUserAgentModeKey = false;
@@ -714,19 +818,19 @@ namespace inst::config {
             if (j.contains("validateNCAs")) validateNCAs = j["validateNCAs"].get<bool>();
             if (j.contains("lastNetUrl")) lastNetUrl = j["lastNetUrl"].get<std::string>();
             if (j.contains("offlineDbManifestUrl")) offlineDbManifestUrl = j["offlineDbManifestUrl"].get<std::string>();
-            if (j.contains("shopUrl")) shopUrl = j["shopUrl"].get<std::string>();
-            if (j.contains("shopUser")) shopUser = j["shopUser"].get<std::string>();
-            if (j.contains("shopPass")) shopPass = j["shopPass"].get<std::string>();
+            if (j.contains("remoteUrl")) remoteUrl = j["remoteUrl"].get<std::string>();
+            if (j.contains("remoteUser")) remoteUser = j["remoteUser"].get<std::string>();
+            if (j.contains("remotePass")) remotePass = j["remotePass"].get<std::string>();
             if (j.contains("httpUserAgentMode")) {
                 httpUserAgentMode = j["httpUserAgentMode"].get<std::string>();
                 hasHttpUserAgentModeKey = true;
             }
             if (j.contains("httpUserAgent")) httpUserAgent = j["httpUserAgent"].get<std::string>();
-            if (j.contains("shopHideInstalled")) shopHideInstalled = j["shopHideInstalled"].get<bool>();
-            if (j.contains("shopHideInstalledSection")) shopHideInstalledSection = j["shopHideInstalledSection"].get<bool>();
-            if (j.contains("shopAllBaseOnly")) shopAllBaseOnly = j["shopAllBaseOnly"].get<bool>();
-            if (j.contains("shopLegacyMode")) shopLegacyMode = j["shopLegacyMode"].get<bool>();
-            if (j.contains("shopStartGridMode")) shopStartGridMode = j["shopStartGridMode"].get<bool>();
+            if (j.contains("remoteHideInstalled")) remoteHideInstalled = j["remoteHideInstalled"].get<bool>();
+            if (j.contains("remoteHideInstalledSection")) remoteHideInstalledSection = j["remoteHideInstalledSection"].get<bool>();
+            if (j.contains("remoteAllBaseOnly")) remoteAllBaseOnly = j["remoteAllBaseOnly"].get<bool>();
+            if (j.contains("remoteLegacyMode")) remoteLegacyMode = j["remoteLegacyMode"].get<bool>();
+            if (j.contains("remoteStartGridMode")) remoteStartGridMode = j["remoteStartGridMode"].get<bool>();
             if (j.contains("offlineDbAutoCheckOnStartup")) offlineDbAutoCheckOnStartup = j["offlineDbAutoCheckOnStartup"].get<bool>();
             if (j.contains("verboseInstallLogging")) verboseInstallLogging = j["verboseInstallLogging"].get<bool>();
 
@@ -745,16 +849,16 @@ namespace inst::config {
                 "validateNCAs",
                 "lastNetUrl",
                 "offlineDbManifestUrl",
-                "shopUrl",
-                "shopUser",
-                "shopPass",
+                "remoteUrl",
+                "remoteUser",
+                "remotePass",
                 "httpUserAgentMode",
                 "httpUserAgent",
-                "shopHideInstalled",
-                "shopHideInstalledSection",
-                "shopAllBaseOnly",
-                "shopLegacyMode",
-                "shopStartGridMode",
+                "remoteHideInstalled",
+                "remoteHideInstalledSection",
+                "remoteAllBaseOnly",
+                "remoteLegacyMode",
+                "remoteStartGridMode",
                 "offlineDbAutoCheckOnStartup",
                 "verboseInstallLogging"
             };
@@ -775,27 +879,28 @@ namespace inst::config {
         if (!hasHttpUserAgentModeKey && !Trim(httpUserAgent).empty())
             httpUserAgentMode = "custom";
 
-        if (!Trim(shopUrl).empty()) {
+        if (!Trim(remoteUrl).empty()) {
             std::string protocol;
             std::string host;
             std::string path;
             int port = DefaultPortForProtocol("http");
-            if (ParseShopUrl(shopUrl, protocol, host, port, path)) {
-                ShopProfile normalizedShop;
-                normalizedShop.protocol = protocol;
-                normalizedShop.host = host;
-                normalizedShop.path = path;
-                normalizedShop.port = port;
-                const std::string normalizedShopUrl = BuildShopUrl(normalizedShop);
-                if (normalizedShopUrl != shopUrl)
+            if (ParseRemoteUrl(remoteUrl, protocol, host, port, path)) {
+                RemoteProfile normalizedRemote;
+                normalizedRemote.protocol = protocol;
+                normalizedRemote.host = host;
+                normalizedRemote.path = path;
+                normalizedRemote.port = port;
+                const std::string normalizedRemoteUrl = BuildRemoteUrl(normalizedRemote);
+                if (normalizedRemoteUrl != remoteUrl)
                     needsConfigRewrite = true;
-                shopUrl = normalizedShopUrl;
+                remoteUrl = normalizedRemoteUrl;
             }
         }
 
-        EnsureShopsDirectory();
-        TryMigrateLegacyShopToJson();
-        MigrateLegacyShopFiles();
+        EnsureRemotesDirectory();
+        TryMigrateLegacyRemoteToJson();
+        MigrateLegacyRemoteFiles();
+        MigrateLegacyRemoteIcons();
         if (needsConfigRewrite)
             setConfig();
     }

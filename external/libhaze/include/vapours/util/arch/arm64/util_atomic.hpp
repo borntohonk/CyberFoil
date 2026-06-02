@@ -49,6 +49,9 @@ namespace ams::util {
             std::bit_cast<typename AtomicIntegerStorage<T>::Type, T>(t);
         });
 
+        template<auto>
+        inline constexpr bool DependentFalse = false;
+
         template<UsableAtomicType T>
         using AtomicStorage = typename AtomicIntegerStorage<T>::Type;
 
@@ -157,7 +160,7 @@ namespace ams::util {
             } else if constexpr (Order == std::memory_order_acq_rel || Order == std::memory_order_seq_cst) {
                 return ::ams::util::impl::LoadAcquireExclusiveForAtomic(p);
             } else {
-                static_assert(Order != Order, "Invalid memory order");
+                static_assert(DependentFalse<Order>, "Invalid memory order");
             }
         }
 
@@ -172,7 +175,7 @@ namespace ams::util {
             } else if constexpr (Order == std::memory_order_acq_rel || Order == std::memory_order_seq_cst) {
                 return ::ams::util::impl::StoreReleaseExclusiveForAtomic(p, s);
             } else {
-                static_assert(Order != Order, "Invalid memory order");
+                static_assert(DependentFalse<Order>, "Invalid memory order");
             }
         }
 

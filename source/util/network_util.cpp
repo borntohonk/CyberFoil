@@ -124,7 +124,7 @@ namespace tin::network
 
     static void BuildVersionAndRevision(std::string& outVersion, std::string& outRevision)
     {
-        const std::string raw = inst::config::shopLegacyMode ? "20.0.2" : inst::config::appVersion;
+        const std::string raw = inst::config::remoteLegacyMode ? "20.0.2" : inst::config::appVersion;
         outVersion = raw.empty() ? "0.0" : raw;
         outRevision = "0";
 
@@ -234,7 +234,7 @@ namespace tin::network
         const std::string uidHeader = "UID: " + inst::util::ComputeUidFromMmcCid();
         const std::string versionHeader = "Version: " + versionValue;
         const std::string revisionHeader = "Revision: " + revisionValue;
-        const std::string languageHeader = "Language: " + Language::GetShopHeaderLanguage();
+        const std::string languageHeader = "Language: " + Language::GetRemoteHeaderLanguage();
         const std::string hauthHeader = "HAUTH: " + inst::util::ComputeHauthFromUrl(requestUrl);
         const std::string uauthHeader = "UAUTH: " + inst::util::ComputeUauthFromUrl(
             requestUrl,

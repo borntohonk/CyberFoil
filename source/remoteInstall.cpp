@@ -13,7 +13,7 @@
 #include <zlib.h>
 #include <zstd.h>
 #include <mbedtls/aes.h>
-#include "shopInstall.hpp"
+#include "remoteInstall.hpp"
 #include "install/http_nsp.hpp"
 #include "install/http_xci.hpp"
 #include "install/install.hpp"
@@ -49,6 +49,8 @@ namespace inst::ui {
 }
 
 namespace {
+    std::string gRemoteApiPrefix = "/api/remote";
+
     std::string FormatOneDecimal(double value)
     {
         char buf[32];
@@ -82,7 +84,7 @@ namespace {
         return size * numItems;
     }
 
-    std::string NormalizeShopUrl(std::string url)
+    std::string NormalizeRemoteUrl(std::string url)
     {
         url.erase(0, url.find_first_not_of(" \t\r\n"));
         url.erase(url.find_last_not_of(" \t\r\n") + 1);
@@ -200,7 +202,7 @@ namespace {
 
     void BuildVersionAndRevision(std::string& outVersion, std::string& outRevision)
     {
-        const std::string raw = inst::config::shopLegacyMode ? "20.0.2" : inst::config::appVersion;
+        const std::string raw = inst::config::remoteLegacyMode ? "20.0.2" : inst::config::appVersion;
         outVersion = raw.empty() ? "0.0" : raw;
         outRevision = "0";
 
@@ -241,7 +243,7 @@ namespace {
         BuildVersionAndRevision(versionValue, revisionValue);
         std::string versionHeader = "Version: " + versionValue;
         std::string revisionHeader = "Revision: " + revisionValue;
-        std::string languageHeader = "Language: " + Language::GetShopHeaderLanguage();
+        std::string languageHeader = "Language: " + Language::GetRemoteHeaderLanguage();
         std::string hauthHeader = "HAUTH: " + inst::util::ComputeHauthFromUrl(requestUrl);
         std::string uauthHeader = "UAUTH: " + inst::util::ComputeUauthFromUrl(requestUrl, user, pass);
         std::string uidHeader = "UID: " + inst::util::ComputeUidFromMmcCid();
@@ -398,7 +400,7 @@ namespace {
         }
 
         if (body.size() < kLegacyHeaderSize) {
-            outError = "Encrypted shop response is truncated.";
+            outError = "Encrypted Remote response is truncated.";
             return false;
         }
 
@@ -411,12 +413,12 @@ namespace {
 
         if (encrypted) {
 #if !HAVE_LIB_BLOB
-            outError = "This build was made without prebuilt/lib.a; encrypted shop responses are not supported.";
+            outError = "This build was made without prebuilt/lib.a; encrypted Remote responses are not supported.";
             return false;
 #else
             std::vector<std::uint8_t> aesKey;
             if (!TryUnwrapLegacyAesKey(reinterpret_cast<const std::uint8_t*>(body.data() + 0x8), aesKey)) {
-                outError = "Encrypted shop response could not be decrypted.";
+                outError = "Encrypted Remote response could not be decrypted.";
                 return false;
             }
 
@@ -426,14 +428,14 @@ namespace {
                 mbedtls_aes_free(&aesCtx);
                 if (!aesKey.empty())
                     inst::util::SecureWipe(aesKey.data(), aesKey.size());
-                outError = "Failed to initialize AES decryption for encrypted shop response.";
+                outError = "Failed to initialize AES decryption for encrypted Remote response.";
                 return false;
             }
             if ((payload.size() % 16) != 0) {
                 mbedtls_aes_free(&aesCtx);
                 if (!aesKey.empty())
                     inst::util::SecureWipe(aesKey.data(), aesKey.size());
-                outError = "Encrypted shop payload is not AES block aligned.";
+                outError = "Encrypted Remote payload is not AES block aligned.";
                 return false;
             }
             for (std::size_t off = 0; off < payload.size(); off += 16)
@@ -482,7 +484,7 @@ namespace {
                 }
             }
             if (!ok) {
-                outError = "Failed to decompress zlib-compressed shop payload.";
+                outError = "Failed to decompress zlib-compressed Remote payload.";
                 return false;
             }
         } else if (compression == kLegacyCompressionZstd) {
@@ -494,11 +496,11 @@ namespace {
                 }
             }
             if (!ok) {
-                outError = "Failed to decompress zstd-compressed shop payload.";
+                outError = "Failed to decompress zstd-compressed Remote payload.";
                 return false;
             }
         } else {
-            outError = "Unsupported compressed shop payload format.";
+            outError = "Unsupported compressed Remote payload format.";
             return false;
         }
 
@@ -561,19 +563,22 @@ namespace {
         return baseUrl + "/" + urlPath;
     }
 
-    std::uint64_t GetOfflineLookupTitleId(const shopInstStuff::ShopItem& item);
+    std::uint64_t GetOfflineLookupTitleId(const remoteInstStuff::RemoteItem& item);
 
-    std::string GetShopIconCachePath(const shopInstStuff::ShopItem& item)
+    std::string GetRemoteIconCachePath(const remoteInstStuff::RemoteItem& item)
     {
         if (!item.hasIconUrl)
             return "";
-        std::string cacheDir = inst::config::appDir + "/shop_icons";
+
+        const std::filesystem::path primaryDir(inst::config::remoteIconsDir);
+        const std::filesystem::path legacyDir(inst::config::legacyShopIconsDir);
         std::error_code ec;
-        if (!std::filesystem::exists(cacheDir, ec)) {
-            std::filesystem::create_directory(cacheDir, ec);
-            if (ec)
-                return "";
+        bool primaryUsable = std::filesystem::exists(primaryDir, ec);
+        if (!primaryUsable) {
+            ec.clear();
+            primaryUsable = std::filesystem::create_directory(primaryDir, ec);
         }
+        const bool legacyUsable = std::filesystem::exists(legacyDir, ec);
 
         std::string urlPath = item.iconUrl;
         std::string ext = ".jpg";
@@ -591,10 +596,19 @@ namespace {
             fileName = std::to_string(item.titleId);
         else
             fileName = std::to_string(std::hash<std::string>{}(item.iconUrl));
-        return cacheDir + "/" + fileName + ext;
+
+        const std::filesystem::path primaryPath = primaryDir / (fileName + ext);
+        const std::filesystem::path legacyPath = legacyDir / (fileName + ext);
+        if (std::filesystem::exists(primaryPath))
+            return primaryPath.string();
+        if (std::filesystem::exists(legacyPath))
+            return legacyPath.string();
+        if (!primaryUsable && legacyUsable)
+            return legacyPath.string();
+        return primaryPath.string();
     }
 
-    void UpdateInstallIcon(const shopInstStuff::ShopItem& item)
+    void UpdateInstallIcon(const remoteInstStuff::RemoteItem& item)
     {
         if (item.hasTitleId) {
             const std::uint64_t lookupTitleId = GetOfflineLookupTitleId(item);
@@ -612,14 +626,14 @@ namespace {
             return;
         }
 
-        std::string filePath = GetShopIconCachePath(item);
+        std::string filePath = GetRemoteIconCachePath(item);
         if (filePath.empty()) {
             inst::ui::instPage::clearInstallIcon();
             return;
         }
 
         if (!std::filesystem::exists(filePath)) {
-            bool ok = inst::curl::downloadImageWithAuth(item.iconUrl, filePath.c_str(), inst::config::shopUser, inst::config::shopPass, 8000);
+            bool ok = inst::curl::downloadImageWithAuth(item.iconUrl, filePath.c_str(), inst::config::remoteUser, inst::config::remotePass, 8000);
             if (!ok && std::filesystem::exists(filePath))
                 std::filesystem::remove(filePath);
         }
@@ -1001,7 +1015,7 @@ namespace {
         return std::string(buf);
     }
 
-    void ApplyLegacyMetadataFromName(const std::string& name, shopInstStuff::ShopItem& item)
+    void ApplyLegacyMetadataFromName(const std::string& name, remoteInstStuff::RemoteItem& item)
     {
         std::vector<std::string> hexTokens;
         std::size_t pos = 0;
@@ -1057,9 +1071,9 @@ namespace {
             InferAppTypeFromTitleId(item.titleId, item.appType);
     }
 
-    bool TryResolveBaseTitleId(const shopInstStuff::ShopItem& item, std::uint64_t& outBaseId)
+    bool TryResolveBaseTitleId(const remoteInstStuff::RemoteItem& item, std::uint64_t& outBaseId)
     {
-        // Some shops publish title_id as the base title even for UPDATE/DLC entries.
+        // Some remotes publish title_id as the base title even for UPDATE/DLC entries.
         if (item.hasTitleId && ((item.titleId & 0xFFFULL) == 0x000ULL)) {
             outBaseId = item.titleId;
             return true;
@@ -1098,7 +1112,7 @@ namespace {
         return outBaseId != 0;
     }
 
-    std::uint64_t GetOfflineLookupTitleId(const shopInstStuff::ShopItem& item)
+    std::uint64_t GetOfflineLookupTitleId(const remoteInstStuff::RemoteItem& item)
     {
         std::uint64_t baseTitleId = 0;
         if (!TryResolveBaseTitleId(item, baseTitleId))
@@ -1106,7 +1120,7 @@ namespace {
         return baseTitleId;
     }
 
-    void ApplyOfflineDataToItem(shopInstStuff::ShopItem& item, bool hasExplicitName)
+    void ApplyOfflineDataToItem(remoteInstStuff::RemoteItem& item, bool hasExplicitName)
     {
         const std::uint64_t lookupTitleId = GetOfflineLookupTitleId(item);
         if (lookupTitleId == 0)
@@ -1130,30 +1144,30 @@ namespace {
 
     }
 
-    std::vector<shopInstStuff::ShopSection> ParseShopSectionsBody(const std::string& body, const std::string& baseUrl, std::string& error)
+    std::vector<remoteInstStuff::RemoteSection> ParseRemoteSectionsBody(const std::string& body, const std::string& baseUrl, std::string& error)
     {
-        std::vector<shopInstStuff::ShopSection> sections;
+        std::vector<remoteInstStuff::RemoteSection> sections;
         try {
-            nlohmann::json shop = nlohmann::json::parse(body);
-            if (shop.contains("error") && shop["error"].is_string()) {
-                error = "Shop login failed. " + shop["error"].get<std::string>();
+            nlohmann::json remote = nlohmann::json::parse(body);
+            if (remote.contains("error") && remote["error"].is_string()) {
+                error = "Remote login failed. " + remote["error"].get<std::string>();
                 return sections;
             }
-            if (!shop.contains("sections") || !shop["sections"].is_array()) {
+            if (!remote.contains("sections") || !remote["sections"].is_array()) {
                 std::string lower = body;
                 std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
                 if (lower.find("unauthorized") != std::string::npos || lower.find("login") != std::string::npos) {
-                    error = "Shop login failed. Check username/password or enable public shop.";
+                    error = "Remote login failed. Check username/password or enable public Remote.";
                 } else {
-                    error = "Shop response missing sections.";
+                    error = "Remote response missing sections.";
                 }
                 return sections;
             }
 
-            for (const auto& section : shop["sections"]) {
+            for (const auto& section : remote["sections"]) {
                 if (!section.contains("items") || !section["items"].is_array())
                     continue;
-                shopInstStuff::ShopSection parsed;
+                remoteInstStuff::RemoteSection parsed;
                 parsed.id = section.value("id", "all");
                 parsed.title = section.value("title", "All");
                 for (const auto& entry : section["items"]) {
@@ -1186,7 +1200,7 @@ namespace {
                     }
 
                     if (!fullUrl.empty() && !name.empty()) {
-                        shopInstStuff::ShopItem item;
+                        remoteInstStuff::RemoteItem item;
                         item.name = name;
                         item.url = fullUrl;
                         item.size = size;
@@ -1281,7 +1295,7 @@ namespace {
             }
         }
         catch (...) {
-            error = "Invalid shop response.";
+            error = "Invalid Remote response.";
             return {};
         }
 
@@ -1289,17 +1303,22 @@ namespace {
     }
 }
 
-namespace shopInstStuff {
+namespace remoteInstStuff {
+    std::string GetRemoteApiPrefix()
+    {
+        return gRemoteApiPrefix;
+    }
+
     namespace {
-        struct ShopFetchProgressContext {
-            const ShopFetchProgressCallback* cb = nullptr;
+        struct RemoteFetchProgressContext {
+            const RemoteFetchProgressCallback* cb = nullptr;
             curl_off_t lastNow = -1;
             curl_off_t lastTotal = -1;
         };
 
-        int ShopFetchProgressHandler(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/)
+        int RemoteFetchProgressHandler(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/)
         {
-            auto* ctx = static_cast<ShopFetchProgressContext*>(clientp);
+            auto* ctx = static_cast<RemoteFetchProgressContext*>(clientp);
             if (ctx == nullptr || ctx->cb == nullptr || !(*ctx->cb))
                 return 0;
 
@@ -1327,9 +1346,9 @@ namespace shopInstStuff {
     };
 
     namespace {
-        constexpr long kShopRequestTimeoutMs = 30000L;
-        constexpr long kShopConnectTimeoutMs = 10000L;
-        constexpr int kShopFetchMaxAttempts = 4;
+        constexpr long kRemoteRequestTimeoutMs = 30000L;
+        constexpr long kRemoteConnectTimeoutMs = 10000L;
+        constexpr int kRemoteFetchMaxAttempts = 4;
 
         bool IsRetriableHttpCode(long responseCode)
         {
@@ -1359,17 +1378,17 @@ namespace shopInstStuff {
             }
         }
 
-        bool ShouldRetryShopFetch(const FetchResult& result)
+        bool ShouldRetryRemoteFetch(const FetchResult& result)
         {
             if (result.curlCode != CURLE_OK)
                 return IsRetriableCurlCode(result.curlCode);
             return IsRetriableHttpCode(result.responseCode);
         }
 
-        std::uint32_t ShopRetryDelayMs(int attemptIndex)
+        std::uint32_t RemoteRetryDelayMs(int attemptIndex)
         {
             // attemptIndex is 0-based for retries after the first try.
-            static constexpr std::uint32_t kBackoffMs[kShopFetchMaxAttempts - 1] = {450, 1000, 1800};
+            static constexpr std::uint32_t kBackoffMs[kRemoteFetchMaxAttempts - 1] = {450, 1000, 1800};
             if (attemptIndex < 0)
                 return kBackoffMs[0];
             if (attemptIndex >= static_cast<int>(sizeof(kBackoffMs) / sizeof(kBackoffMs[0])))
@@ -1378,11 +1397,11 @@ namespace shopInstStuff {
         }
     }
 
-    FetchResult FetchShopResponse(const std::string& url, const std::string& user, const std::string& pass, const ShopFetchProgressCallback& progressCb = ShopFetchProgressCallback())
+    FetchResult FetchRemoteResponse(const std::string& url, const std::string& user, const std::string& pass, const RemoteFetchProgressCallback& progressCb = RemoteFetchProgressCallback())
     {
         FetchResult lastResult;
 
-        for (int attempt = 0; attempt < kShopFetchMaxAttempts; attempt++) {
+        for (int attempt = 0; attempt < kRemoteFetchMaxAttempts; attempt++) {
             FetchResult result;
             CURL* curl = curl_easy_init();
             if (!curl) {
@@ -1393,19 +1412,19 @@ namespace shopInstStuff {
             curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
             curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
             curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-            const std::string userAgent = inst::config::shopLegacyMode ? std::string() : inst::curl::getDefaultUserAgent();
+            const std::string userAgent = inst::config::remoteLegacyMode ? std::string() : inst::curl::getDefaultUserAgent();
             curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
             curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteToString);
             curl_easy_setopt(curl, CURLOPT_WRITEDATA, &result.body);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, kShopRequestTimeoutMs);
-            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, kShopConnectTimeoutMs);
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, kRemoteRequestTimeoutMs);
+            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, kRemoteConnectTimeoutMs);
             curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 1L);
 
-            ShopFetchProgressContext progressCtx{};
+            RemoteFetchProgressContext progressCtx{};
             if (progressCb) {
                 progressCtx.cb = &progressCb;
                 curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-                curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, ShopFetchProgressHandler);
+                curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, RemoteFetchProgressHandler);
                 curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progressCtx);
             }
 
@@ -1458,18 +1477,18 @@ namespace shopInstStuff {
                     result.decodeError = std::move(decodeError);
             }
 
-            const bool canRetry = (attempt + 1) < kShopFetchMaxAttempts && ShouldRetryShopFetch(result);
+            const bool canRetry = (attempt + 1) < kRemoteFetchMaxAttempts && ShouldRetryRemoteFetch(result);
             if (!canRetry)
                 return result;
 
             lastResult = result;
-            std::this_thread::sleep_for(std::chrono::milliseconds(ShopRetryDelayMs(attempt)));
+            std::this_thread::sleep_for(std::chrono::milliseconds(RemoteRetryDelayMs(attempt)));
         }
 
         return lastResult;
     }
 
-    bool ValidateShopResponse(const FetchResult& fetch, std::string& error)
+    bool ValidateRemoteResponse(const FetchResult& fetch, std::string& error)
     {
         if (!fetch.error.empty()) {
             error = fetch.error;
@@ -1477,9 +1496,9 @@ namespace shopInstStuff {
         }
         if (fetch.responseCode == 401 || fetch.responseCode == 403) {
             if (!inst::util::HasLegacyAuthSupport()) {
-                error = "Shop requires legacy HAUTH/UAUTH signing, but this build does not support it.";
+                error = "Remote requires legacy HAUTH/UAUTH signing, but this build does not support it.";
             } else {
-                error = "Shop requires authentication. Check credentials or enable public shop in eShop.";
+                error = "Remote requires authentication. Check credentials or enable public Remote.";
             }
             return false;
         }
@@ -1489,14 +1508,14 @@ namespace shopInstStuff {
         }
         std::size_t legacyOffset = std::string::npos;
         if (FindLegacyPayloadOffset(fetch.body, legacyOffset)) {
-            error = "Encrypted shop response could not be decoded.";
+            error = "Encrypted Remote response could not be decoded.";
             return false;
         }
         if (IsLoginUrl(fetch.effectiveUrl.c_str()) || (!fetch.contentType.empty() && fetch.contentType.find("text/html") != std::string::npos) || ContainsHtml(fetch.body)) {
-            if (inst::config::shopLegacyMode && !inst::util::HasLegacyAuthSupport()) {
-                error = "This build does not support this shop";
+            if (inst::config::remoteLegacyMode && !inst::util::HasLegacyAuthSupport()) {
+                error = "This build does not support this Remote";
             } else {
-                error = "eShop returned the login page. Check shop URL, username, and password, or enable public shop.";
+                error = "Remote returned the login page. Check Remote URL, username, and password, or enable public Remote.";
             }
             return false;
         }
@@ -1504,8 +1523,21 @@ namespace shopInstStuff {
     }
 
     namespace {
-        bool AppendShopItemFromEntry(const nlohmann::json& entry, const std::string& baseUrl,
-            std::vector<ShopItem>& items, std::unordered_set<std::string>& seenItemUrls)
+        std::string BuildLegacyIdentityKey(const RemoteItem& item)
+        {
+            if (!item.url.empty())
+                return "url:" + item.url;
+            if (item.hasTitleId)
+                return "tid:" + std::to_string(static_cast<unsigned long long>(item.titleId));
+            if (item.hasAppId)
+                return "aid:" + item.appId;
+            if (!item.name.empty())
+                return "name:" + item.name;
+            return std::string();
+        }
+
+        bool AppendRemoteItemFromEntry(const nlohmann::json& entry, const std::string& baseUrl,
+            std::vector<RemoteItem>& items, std::unordered_set<std::string>& seenItemUrls)
         {
             std::string rawUrl;
             if (entry.is_string()) {
@@ -1565,7 +1597,7 @@ namespace shopInstStuff {
             if (name.empty())
                 return false;
 
-            ShopItem item;
+            RemoteItem item;
             item.name = name;
             item.url = fullUrl;
             item.size = size;
@@ -1619,15 +1651,18 @@ namespace shopInstStuff {
                     else if (entry["createdTs"].is_number_integer()) {
                         const auto parsedCreatedTs = entry["createdTs"].get<long long>();
                         if (parsedCreatedTs > 0)
-                            item.saveCreatedTs = static_cast<std::uint64_t>(parsedCreatedTs);
+                        item.saveCreatedTs = static_cast<std::uint64_t>(parsedCreatedTs);
                     }
                 }
             }
 
-            if (!item.hasIconUrl && !inst::config::shopLegacyMode) {
+            if (inst::config::remoteLegacyMode)
+                ApplyOfflineDataToItem(item, entry.is_object() && entry.contains("name") && entry["name"].is_string());
+
+            if (!item.hasIconUrl && !inst::config::remoteLegacyMode) {
                 std::uint64_t baseTitleId = 0;
                 if (TryResolveBaseTitleId(item, baseTitleId) && baseTitleId != 0) {
-                    item.iconUrl = BuildFullUrl(baseUrl, "/api/shop/icon/" + FormatTitleIdHexUpper(baseTitleId));
+                    item.iconUrl = BuildFullUrl(baseUrl, GetRemoteApiPrefix() + "/icon/" + FormatTitleIdHexUpper(baseTitleId));
                     item.hasIconUrl = true;
                 }
             }
@@ -1637,12 +1672,12 @@ namespace shopInstStuff {
         }
 
         bool AppendLegacyFilesFromJson(const nlohmann::json& files, const std::string& baseUrl,
-            std::vector<ShopItem>& items, std::unordered_set<std::string>& seenItemUrls)
+            std::vector<RemoteItem>& items, std::unordered_set<std::string>& seenItemUrls)
         {
             if (files.is_array()) {
                 bool any = false;
                 for (const auto& entry : files)
-                    any = AppendShopItemFromEntry(entry, baseUrl, items, seenItemUrls) || any;
+                    any = AppendRemoteItemFromEntry(entry, baseUrl, items, seenItemUrls) || any;
                 return any;
             }
 
@@ -1657,13 +1692,13 @@ namespace shopInstStuff {
                     nlohmann::json normalized = value;
                     if ((!normalized.contains("name") || !normalized["name"].is_string()) && !key.empty())
                         normalized["name"] = key;
-                    any = AppendShopItemFromEntry(normalized, baseUrl, items, seenItemUrls) || any;
+                    any = AppendRemoteItemFromEntry(normalized, baseUrl, items, seenItemUrls) || any;
                 } else if (value.is_string()) {
                     nlohmann::json normalized = {
                         {"name", key},
                         {"url", value.get<std::string>()}
                     };
-                    any = AppendShopItemFromEntry(normalized, baseUrl, items, seenItemUrls) || any;
+                    any = AppendRemoteItemFromEntry(normalized, baseUrl, items, seenItemUrls) || any;
                 } else if (value.is_array()) {
                     for (const auto& sub : value) {
                         if (!sub.is_string())
@@ -1672,10 +1707,107 @@ namespace shopInstStuff {
                             {"name", key},
                             {"url", sub.get<std::string>()}
                         };
-                        any = AppendShopItemFromEntry(normalized, baseUrl, items, seenItemUrls) || any;
+                        any = AppendRemoteItemFromEntry(normalized, baseUrl, items, seenItemUrls) || any;
                     }
                 }
             }
+            return any;
+        }
+
+        bool AppendLegacyTitleDbFromJson(const nlohmann::json& titledb, const std::string& baseUrl,
+            std::vector<RemoteItem>& items, std::unordered_set<std::string>& seenItemUrls)
+        {
+            if (!titledb.is_object())
+                return false;
+
+            bool any = false;
+            for (auto it = titledb.begin(); it != titledb.end(); ++it) {
+                const std::string key = it.key();
+                const auto& value = it.value();
+                if (!value.is_object())
+                    continue;
+
+                RemoteItem item;
+                item.name = value.value("name", key);
+                item.size = 0;
+                if (value.contains("size")) {
+                    if (value["size"].is_number_unsigned())
+                        item.size = value["size"].get<std::uint64_t>();
+                    else if (value["size"].is_number_integer()) {
+                        const auto parsedSize = value["size"].get<long long>();
+                        if (parsedSize > 0)
+                            item.size = static_cast<std::uint64_t>(parsedSize);
+                    }
+                }
+
+                const std::string idText = value.value("id", key);
+                std::uint64_t titleId = 0;
+                if (TryParseTitleIdText(idText, titleId) || TryParseTitleIdText(key, titleId)) {
+                    item.titleId = titleId;
+                    item.hasTitleId = true;
+                    InferAppTypeFromTitleId(titleId, item.appType);
+                }
+
+                if (value.contains("version")) {
+                    if (value["version"].is_number_unsigned()) {
+                        item.appVersion = value["version"].get<std::uint32_t>();
+                        item.hasAppVersion = true;
+                    } else if (value["version"].is_number_integer()) {
+                        const auto parsedVersion = value["version"].get<long long>();
+                        if (parsedVersion >= 0) {
+                            item.appVersion = static_cast<std::uint32_t>(parsedVersion);
+                            item.hasAppVersion = true;
+                        }
+                    }
+                }
+
+                if (value.contains("releaseDate")) {
+                    if (value["releaseDate"].is_number_unsigned()) {
+                        item.releaseDate = value["releaseDate"].get<std::uint32_t>();
+                        item.hasReleaseDate = true;
+                    } else if (value["releaseDate"].is_number_integer()) {
+                        const auto parsedReleaseDate = value["releaseDate"].get<long long>();
+                        if (parsedReleaseDate > 0) {
+                            item.releaseDate = static_cast<std::uint32_t>(parsedReleaseDate);
+                            item.hasReleaseDate = true;
+                        }
+                    }
+                } else if (value.contains("release_date")) {
+                    if (value["release_date"].is_number_unsigned()) {
+                        item.releaseDate = value["release_date"].get<std::uint32_t>();
+                        item.hasReleaseDate = true;
+                    } else if (value["release_date"].is_number_integer()) {
+                        const auto parsedReleaseDate = value["release_date"].get<long long>();
+                        if (parsedReleaseDate > 0) {
+                            item.releaseDate = static_cast<std::uint32_t>(parsedReleaseDate);
+                            item.hasReleaseDate = true;
+                        }
+                    }
+                }
+
+                if (value.contains("description") && value["description"].is_string() && item.name.empty())
+                    item.name = value["description"].get<std::string>();
+
+                if (item.name.empty())
+                    continue;
+
+                ApplyOfflineDataToItem(item, true);
+                if (!item.hasIconUrl && !item.hasTitleId && !item.url.empty()) {
+                    std::uint64_t baseTitleId = 0;
+                    if (TryResolveBaseTitleId(item, baseTitleId) && baseTitleId != 0) {
+                        item.iconUrl = BuildFullUrl(baseUrl, GetRemoteApiPrefix() + "/icon/" + FormatTitleIdHexUpper(baseTitleId));
+                        item.hasIconUrl = true;
+                    }
+                }
+
+                const std::string identityKey = BuildLegacyIdentityKey(item);
+                if (!identityKey.empty() && !seenItemUrls.insert(identityKey).second)
+                    continue;
+
+                items.push_back(std::move(item));
+                any = true;
+            }
+
             return any;
         }
 
@@ -1694,25 +1826,25 @@ namespace shopInstStuff {
             return "";
         }
 
-        bool CollectShopItemsFromJson(const nlohmann::json& shop, const std::string& baseUrl,
-            const std::string& user, const std::string& pass, std::vector<ShopItem>& items,
+        bool CollectRemoteItemsFromJson(const nlohmann::json& remote, const std::string& baseUrl,
+            const std::string& user, const std::string& pass, std::vector<RemoteItem>& items,
             std::unordered_set<std::string>& seenItemUrls, std::unordered_set<std::string>& seenManifestUrls,
-            std::string& error, const ShopFetchProgressCallback& progressCb)
+            std::string& error, const RemoteFetchProgressCallback& progressCb)
         {
-            if (!shop.is_object()) {
-                error = "Invalid shop response.";
+            if (!remote.is_object()) {
+                error = "Invalid Remote response.";
                 return false;
             }
-            if (shop.contains("error") && shop["error"].is_string()) {
-                error = shop["error"].get<std::string>();
+            if (remote.contains("error") && remote["error"].is_string()) {
+                error = remote["error"].get<std::string>();
                 return false;
             }
 
             bool handled = false;
 
-            if (shop.contains("sections") && shop["sections"].is_array()) {
+            if (remote.contains("sections") && remote["sections"].is_array()) {
                 std::string parseError;
-                std::vector<ShopSection> parsedSections = ParseShopSectionsBody(shop.dump(), baseUrl, parseError);
+                std::vector<RemoteSection> parsedSections = ParseRemoteSectionsBody(remote.dump(), baseUrl, parseError);
                 if (!parsedSections.empty()) {
                     for (const auto& section : parsedSections) {
                         for (const auto& sectionItem : section.items) {
@@ -1725,18 +1857,22 @@ namespace shopInstStuff {
                 }
             }
 
-            if (shop.contains("files")) {
-                if (AppendLegacyFilesFromJson(shop["files"], baseUrl, items, seenItemUrls))
+            if (remote.contains("files")) {
+                if (AppendLegacyFilesFromJson(remote["files"], baseUrl, items, seenItemUrls))
                     handled = true;
             }
-            if (shop.contains("paths")) {
-                if (AppendLegacyFilesFromJson(shop["paths"], baseUrl, items, seenItemUrls))
+            if (remote.contains("paths")) {
+                if (AppendLegacyFilesFromJson(remote["paths"], baseUrl, items, seenItemUrls))
+                    handled = true;
+            }
+            if (remote.contains("titledb")) {
+                if (AppendLegacyTitleDbFromJson(remote["titledb"], baseUrl, items, seenItemUrls))
                     handled = true;
             }
 
-            if (shop.contains("directories") && shop["directories"].is_array()) {
+            if (remote.contains("directories") && remote["directories"].is_array()) {
                 handled = true;
-                for (const auto& directoryEntry : shop["directories"]) {
+                for (const auto& directoryEntry : remote["directories"]) {
                     const std::string directoryPath = GetDirectoryEntryUrl(directoryEntry);
                     if (directoryPath.empty())
                         continue;
@@ -1747,25 +1883,25 @@ namespace shopInstStuff {
                     if (!seenManifestUrls.insert(directoryUrl).second)
                         continue;
 
-                    FetchResult directoryFetch = FetchShopResponse(directoryUrl, user, pass, progressCb);
-                    if (!ValidateShopResponse(directoryFetch, error))
+                    FetchResult directoryFetch = FetchRemoteResponse(directoryUrl, user, pass, progressCb);
+                    if (!ValidateRemoteResponse(directoryFetch, error))
                         return false;
 
                     nlohmann::json directoryJson;
                     try {
                         directoryJson = nlohmann::json::parse(directoryFetch.body);
                     } catch (...) {
-                        error = "Invalid shop response.";
+                        error = "Invalid Remote response.";
                         return false;
                     }
 
-                    if (!CollectShopItemsFromJson(directoryJson, baseUrl, user, pass, items, seenItemUrls, seenManifestUrls, error, progressCb))
+                    if (!CollectRemoteItemsFromJson(directoryJson, baseUrl, user, pass, items, seenItemUrls, seenManifestUrls, error, progressCb))
                         return false;
                 }
             }
 
             if (!handled) {
-                error = "Shop response missing file list.";
+                error = "Remote response missing file list.";
                 return false;
             }
 
@@ -1773,56 +1909,56 @@ namespace shopInstStuff {
         }
     }
 
-    std::vector<ShopItem> FetchShop(const std::string& shopUrl, const std::string& user, const std::string& pass, std::string& error, const ShopFetchProgressCallback& progressCb)
+    std::vector<RemoteItem> FetchRemote(const std::string& remoteUrl, const std::string& user, const std::string& pass, std::string& error, const RemoteFetchProgressCallback& progressCb)
     {
-        std::vector<ShopItem> items;
+        std::vector<RemoteItem> items;
         error.clear();
 
-        std::string baseUrl = NormalizeShopUrl(shopUrl);
+        std::string baseUrl = NormalizeRemoteUrl(remoteUrl);
         if (baseUrl.empty()) {
-            error = "Shop URL is empty.";
+            error = "Remote URL is empty.";
             return items;
         }
 
-        FetchResult fetch = FetchShopResponse(baseUrl, user, pass, progressCb);
-        if (!ValidateShopResponse(fetch, error))
+        FetchResult fetch = FetchRemoteResponse(baseUrl, user, pass, progressCb);
+        if (!ValidateRemoteResponse(fetch, error))
             return items;
 
         try {
-            nlohmann::json shop = nlohmann::json::parse(fetch.body);
+            nlohmann::json remote = nlohmann::json::parse(fetch.body);
             std::unordered_set<std::string> seenItemUrls;
             std::unordered_set<std::string> seenManifestUrls;
             seenManifestUrls.insert(baseUrl);
-            if (!CollectShopItemsFromJson(shop, baseUrl, user, pass, items, seenItemUrls, seenManifestUrls, error, progressCb))
+            if (!CollectRemoteItemsFromJson(remote, baseUrl, user, pass, items, seenItemUrls, seenManifestUrls, error, progressCb))
                 return items;
         }
         catch (...) {
-            error = "Invalid shop response.";
+            error = "Invalid Remote response.";
             return {};
         }
 
-        std::sort(items.begin(), items.end(), [](const ShopItem& a, const ShopItem& b) {
+        std::sort(items.begin(), items.end(), [](const RemoteItem& a, const RemoteItem& b) {
             return inst::util::ignoreCaseCompare(a.name, b.name);
         });
         return items;
     }
 
-    std::vector<ShopSection> FetchShopSections(const std::string& shopUrl, const std::string& user, const std::string& pass, std::string& error, bool* outUsedLegacyFallback, const ShopFetchProgressCallback& progressCb)
+    std::vector<RemoteSection> FetchRemoteSections(const std::string& remoteUrl, const std::string& user, const std::string& pass, std::string& error, bool* outUsedLegacyFallback, const RemoteFetchProgressCallback& progressCb)
     {
-        std::vector<ShopSection> sections;
+        std::vector<RemoteSection> sections;
         error.clear();
         if (outUsedLegacyFallback)
             *outUsedLegacyFallback = false;
 
-        std::string baseUrl = NormalizeShopUrl(shopUrl);
+        std::string baseUrl = NormalizeRemoteUrl(remoteUrl);
         if (baseUrl.empty()) {
-            error = "Shop URL is empty.";
+            error = "Remote URL is empty.";
             return sections;
         }
 
         auto tryLegacyFallback = [&]() -> bool {
             std::string legacyError;
-            std::vector<ShopItem> items = FetchShop(shopUrl, user, pass, legacyError, progressCb);
+            std::vector<RemoteItem> items = FetchRemote(remoteUrl, user, pass, legacyError, progressCb);
             if (items.empty()) {
                 if (!legacyError.empty())
                     error = legacyError;
@@ -1836,32 +1972,44 @@ namespace shopInstStuff {
             return true;
         };
 
-        if (inst::config::shopLegacyMode) {
+        if (inst::config::remoteLegacyMode) {
             tryLegacyFallback();
             return sections;
         }
 
-        std::string sectionsUrl = baseUrl + "/api/shop/sections";
-        FetchResult fetch = FetchShopResponse(sectionsUrl, user, pass, progressCb);
-        if (fetch.responseCode == 404) {
-            tryLegacyFallback();
-            return sections;
-        }
+        auto trySectionsPath = [&](const std::string& apiPrefix) -> bool {
+            std::string sectionsUrl = baseUrl + apiPrefix + "/sections";
+            FetchResult fetch = FetchRemoteResponse(sectionsUrl, user, pass, progressCb);
+            if (fetch.responseCode == 404)
+                return false;
 
-        if (!ValidateShopResponse(fetch, error)) {
-            if (!fetch.error.empty()) {
-                error = "inst.shop.unreachable"_lang + "\n" + fetch.error;
-                if (fetch.responseCode > 0)
-                    error += "\nHTTP " + std::to_string(fetch.responseCode);
-                return sections;
+            if (!ValidateRemoteResponse(fetch, error)) {
+                if (!fetch.error.empty()) {
+                    error = "inst.remote.unreachable"_lang + "\n" + fetch.error;
+                    if (fetch.responseCode > 0)
+                        error += "\nHTTP " + std::to_string(fetch.responseCode);
+                }
+                return false;
             }
-            if (tryLegacyFallback())
-                return sections;
-            return sections;
-        }
 
-        sections = ParseShopSectionsBody(fetch.body, baseUrl, error);
-        if (sections.empty() && !error.empty() && tryLegacyFallback())
+            std::string parseError;
+            std::vector<RemoteSection> parsed = ParseRemoteSectionsBody(fetch.body, baseUrl, parseError);
+            if (parsed.empty() && !parseError.empty()) {
+                error = parseError;
+                return false;
+            }
+
+            sections = std::move(parsed);
+            error.clear();
+            gRemoteApiPrefix = apiPrefix;
+            return true;
+        };
+
+        if (trySectionsPath("/api/remote"))
+            return sections;
+        if (trySectionsPath("/api/shop"))
+            return sections;
+        if (tryLegacyFallback())
             return sections;
         return sections;
     }
@@ -2233,13 +2381,13 @@ namespace shopInstStuff {
         }
     }
 
-    std::string FetchShopMotd(const std::string& shopUrl, const std::string& user, const std::string& pass)
+    std::string FetchRemoteMotd(const std::string& remoteUrl, const std::string& user, const std::string& pass)
     {
-        std::string baseUrl = NormalizeShopUrl(shopUrl);
+        std::string baseUrl = NormalizeRemoteUrl(remoteUrl);
         if (baseUrl.empty())
             return "";
 
-        FetchResult fetch = FetchShopResponse(baseUrl, user, pass);
+        FetchResult fetch = FetchRemoteResponse(baseUrl, user, pass);
         if (fetch.responseCode == 401 || fetch.responseCode == 403)
             return "";
         if (!fetch.error.empty())
@@ -2248,9 +2396,9 @@ namespace shopInstStuff {
             return "";
 
         try {
-            nlohmann::json shop = nlohmann::json::parse(fetch.body);
-            if (shop.contains("success") && shop["success"].is_string())
-                return shop["success"].get<std::string>();
+            nlohmann::json remote = nlohmann::json::parse(fetch.body);
+            if (remote.contains("success") && remote["success"].is_string())
+                return remote["success"].get<std::string>();
         }
         catch (...) {
             return "";
@@ -2259,13 +2407,13 @@ namespace shopInstStuff {
         return "";
     }
 
-    void installTitleShop(const std::vector<ShopItem>& items, int storage, const std::string& sourceLabel)
+    void installTitleRemote(const std::vector<RemoteItem>& items, int storage, const std::string& sourceLabel)
     {
         inst::util::initInstallServices();
         inst::ui::instPage::loadInstallScreen();
         bool nspInstalled = true;
         NcmStorageId destStorageId = storage ? NcmStorageId_BuiltInUser : NcmStorageId_SdCard;
-        inst::diag::StartSession("shop", items.size());
+        inst::diag::StartSession("remote", items.size());
 
         std::vector<std::string> names;
         names.reserve(items.size());
@@ -2279,8 +2427,8 @@ namespace shopInstStuff {
             previousClockValues.push_back(inst::util::setClockSpeed(2, 1600000000)[0]);
         }
 
-        if (!inst::config::shopUser.empty() || !inst::config::shopPass.empty())
-            tin::network::SetBasicAuth(inst::config::shopUser, inst::config::shopPass);
+        if (!inst::config::remoteUser.empty() || !inst::config::remotePass.empty())
+            tin::network::SetBasicAuth(inst::config::remoteUser, inst::config::remotePass);
         else
             tin::network::ClearBasicAuth();
 
@@ -2298,7 +2446,7 @@ namespace shopInstStuff {
                     inst::ui::instPage::setInstInfoText("Transfer received. Install started...");
                     inst::diag::NoteInstallStarted(currentName);
                     if (!InstallXciHttpStream(items[i].url, destStorageId)) {
-                        THROW_FORMAT("Failed to install XCI from shop.");
+                        THROW_FORMAT("Failed to install XCI from remote.");
                     }
                     inst::diag::RecordSuccess(currentName);
                     continue;
@@ -2358,9 +2506,9 @@ namespace shopInstStuff {
             if (std::filesystem::exists(inst::config::appDir + "/success.wav")) audioPath = inst::config::appDir + "/success.wav";
             std::thread audioThread(inst::util::playAudio, audioPath);
             if (items.size() > 1)
-                inst::ui::mainApp->CreateShowDialog(std::to_string(items.size()) + "inst.info_page.desc0"_lang, Language::GetRandomMsg(), {"common.ok"_lang}, true);
+                inst::ui::mainApp->CreateShowDialog(std::to_string(items.size()) + "inst.info_page.desc0"_lang, "inst.info_page.complete"_lang, {"common.ok"_lang}, true);
             else
-                inst::ui::mainApp->CreateShowDialog(names.front() + "inst.info_page.desc1"_lang, Language::GetRandomMsg(), {"common.ok"_lang}, true);
+                inst::ui::mainApp->CreateShowDialog(names.front() + "inst.info_page.desc1"_lang, "inst.info_page.complete"_lang, {"common.ok"_lang}, true);
             audioThread.join();
         }
 

@@ -23,7 +23,7 @@
 - `httpUserAgentMode` can be `default`, `chrome`, `safari`, `firefox`, `tinfoil`, or `custom`.
 - `default` uses `cyberfoil`.
 - `tinfoil` sends an empty User-Agent value.
-- Preset/custom modes are applied across network requests (downloads, shop, and save sync).
+- Preset/custom modes are applied across network requests (downloads, Remote, and save sync).
 - `httpUserAgent` is used when `httpUserAgentMode` is `custom`.
 
 ## Release Package Layout

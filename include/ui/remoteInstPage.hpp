@@ -1,7 +1,7 @@
 #pragma once
 
 #include <pu/Plutonium>
-#include "shopInstall.hpp"
+#include "remoteInstall.hpp"
 #include "ui/bottomHint.hpp"
 #include "util/save_sync.hpp"
 #include <atomic>
@@ -16,13 +16,13 @@
 
 using namespace pu::ui::elm;
 namespace inst::ui {
-    class shopInstPage : public pu::ui::Layout
+    class remoteInstPage : public pu::ui::Layout
     {
         public:
-            shopInstPage();
-            ~shopInstPage();
-            PU_SMART_CTOR(shopInstPage)
-            void startShop(bool forceRefresh = false);
+            remoteInstPage();
+            ~remoteInstPage();
+            PU_SMART_CTOR(remoteInstPage)
+            void startRemote(bool forceRefresh = false);
             void startInstall();
             void onInput(u64 Down, u64 Up, u64 Held, pu::ui::Touch Pos);
             TextBlock::Ref pageInfoText;
@@ -52,10 +52,10 @@ namespace inst::ui {
                 DateDesc,
                 NameAsc
             };
-            std::vector<shopInstStuff::ShopSection> shopSections;
-            std::vector<shopInstStuff::ShopItem> selectedItems;
-            std::vector<shopInstStuff::ShopItem> visibleItems;
-            std::vector<shopInstStuff::ShopItem> availableUpdates;
+            std::vector<remoteInstStuff::RemoteSection> remoteSections;
+            std::vector<remoteInstStuff::RemoteItem> selectedItems;
+            std::vector<remoteInstStuff::RemoteItem> visibleItems;
+            std::vector<remoteInstStuff::RemoteItem> availableUpdates;
             std::vector<inst::save_sync::SaveSyncEntry> saveSyncEntries;
             struct InstalledSnapshot {
                 bool ready = false;
@@ -72,11 +72,11 @@ namespace inst::ui {
             bool saveSyncLoaded = false;
             bool pendingMotdFetch = false;
             bool suppressBottomHints = false;
-            std::string activeShopUrl;
+            std::string activeRemoteUrl;
             bool catalogCacheValid = false;
             bool catalogCacheUsedLegacyFallback = false;
             std::string catalogCacheKey;
-            std::vector<shopInstStuff::ShopSection> catalogCacheSections;
+            std::vector<remoteInstStuff::RemoteSection> catalogCacheSections;
             BrowseSortMode browseSortMode = BrowseSortMode::Default;
             BottomHintTouchState bottomHintTouch;
             std::vector<BottomHintSegment> bottomHintSegments;
@@ -115,9 +115,9 @@ namespace inst::ui {
             std::vector<inst::save_sync::SaveSyncRemoteVersion> saveVersionSelectorVersions;
             int gridSelectedIndex = 0;
             int gridPage = -1;
-            bool shopGridMode = false;
-            int shopGridIndex = 0;
-            int shopGridPage = -1;
+            bool remoteGridMode = false;
+            int remoteGridIndex = 0;
+            int remoteGridPage = -1;
             int gridHoldDirX = 0;
             int gridHoldDirY = 0;
             u64 gridHoldStartTick = 0;
@@ -159,8 +159,8 @@ namespace inst::ui {
             Image::Ref previewImage;
             Rectangle::Ref gridHighlight;
             std::vector<Image::Ref> gridImages;
-            std::vector<Rectangle::Ref> shopGridSelectHighlights;
-            std::vector<Image::Ref> shopGridSelectIcons;
+            std::vector<Rectangle::Ref> remoteGridSelectHighlights;
+            std::vector<Image::Ref> remoteGridSelectIcons;
             TextBlock::Ref gridTitleText;
             TextBlock::Ref imageLoadingText;
             Rectangle::Ref listMarqueeMaskRect;
@@ -206,7 +206,7 @@ namespace inst::ui {
             void updateButtonsText();
             void setButtonsText(const std::string& text);
             void getListTextBounds(int& textX, int& textWidth) const;
-            std::string buildListMenuLabel(const shopInstStuff::ShopItem& item);
+            std::string buildListMenuLabel(const remoteInstStuff::RemoteItem& item);
             void updateListMarquee(bool force);
             void buildInstalledSection();
             void buildLegacyOwnedSections();
@@ -214,15 +214,15 @@ namespace inst::ui {
             void filterOwnedSections();
             void updatePreview();
             void updateInstalledGrid();
-            void updateShopGrid();
+            void updateRemoteGrid();
             void updateDebug();
-            const std::vector<shopInstStuff::ShopItem>& getCurrentItems() const;
+            const std::vector<remoteInstStuff::RemoteItem>& getCurrentItems() const;
             bool isAllSection() const;
             bool isInstalledSection() const;
             bool isSaveSyncSection() const;
             void ensureSaveSyncSectionLoaded();
             void showInstalledDetails();
-            void buildSaveSyncSection(const std::string& shopUrl);
+            void buildSaveSyncSection(const std::string& remoteUrl);
             void refreshSaveSyncSection(std::uint64_t selectedTitleId, int previousSectionIndex);
             bool openSaveVersionSelector(const inst::save_sync::SaveSyncEntry& entry, int previousSectionIndex, bool deleteMode = false);
             void closeSaveVersionSelector(bool refreshList);
@@ -238,7 +238,7 @@ namespace inst::ui {
             void updateDescriptionPanel();
             void refreshAfterInstall();
             void resetIconDownloadState();
-            void queueIconDownload(const shopInstStuff::ShopItem& item, const std::string& filePath);
+            void queueIconDownload(const remoteInstStuff::RemoteItem& item, const std::string& filePath);
             void refreshImageLoadingText(bool showCompleted = false);
             void iconDownloadThreadMain();
             bool buildInstalledSnapshot();

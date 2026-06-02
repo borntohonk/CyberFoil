@@ -72,12 +72,12 @@ namespace Language {
                 break;
             case SetLanguage_ZHTW:
                 languagePath = "romfs:/lang/zh-TW.json";
-                // the default font will miss some chinese character, so use a chinese font (traditional)
-                pu::ui::render::SetDefaultFontFromShared(pu::ui::render::SharedFont::ChineseTraditional);
+                // Use the shared Chinese font that is available on all targets.
+                pu::ui::render::SetDefaultFontFromShared(pu::ui::render::SharedFont::ChineseSimplified);
                 break;
             case SetLanguage_ZHHANT:
                 languagePath = "romfs:/lang/zh-Hant.json";
-                pu::ui::render::SetDefaultFontFromShared(pu::ui::render::SharedFont::ChineseTraditional);
+                pu::ui::render::SetDefaultFontFromShared(pu::ui::render::SharedFont::ChineseSimplified);
                 break;
             case SetLanguage_ENUS:
             default:
@@ -118,7 +118,7 @@ namespace Language {
         return(j[rand() % j.size()]);
     }
 
-    std::string GetShopHeaderLanguage()
+    std::string GetRemoteHeaderLanguage()
     {
         const int langInt = ResolveConfiguredLanguage();
         switch (langInt) {
